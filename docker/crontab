@@ -1,0 +1,1 @@
+0 0 * * * /app/b3-data-hub >> /proc/1/fd/1 2>> /proc/1/fd/2
