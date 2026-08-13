@@ -28,7 +28,7 @@ ImportHistoricalQuotesService
         +--> HistoricalQuoteSource (outbound port)
         |          |
         |          v
-        |     adapter/b3 -> HTTP B3
+        |     adapter/outbound/b3 -> HTTP B3
         |
         +--> HistoricalFile.Validate()
         |          |
@@ -38,17 +38,17 @@ ImportHistoricalQuotesService
         +--> FileStore (outbound port)
         |          |
         |          v
-        |     adapter/storage -> disco local
+        |     adapter/outbound/storage -> disco local
         |
         +--> HistoricalQuoteParser (outbound port)
         |          |
         |          v
-        |     adapter/cotahist -> registros
+        |     adapter/outbound/cotahist -> registros
         |
         `--> HistoricalQuoteRepository (outbound port)
                    |
                    v
-              adapter/postgres -> PostgreSQL
+              adapter/outbound/postgres -> PostgreSQL
 ```
 
 As interfaces em `internal/application/ports/outbound` descrevem as capacidades externas necessárias pelos casos de uso. O domínio permanece independente em `internal/domain`, e os tipos em `internal/adapters` fornecem as implementações concretas.
@@ -66,12 +66,13 @@ b3-data-hub/
 |   |   |   `-- outbound/
 |   |   `-- usecases/
 |   |-- adapters/
-|   |   |-- b3/
-|   |   |-- cotahist/
-|   |   |-- postgres/
-|   |   |   |-- queries/
-|   |   |   `-- sqlcgen/
-|   |   `-- storage/
+|   |   `-- outbound/
+|   |       |-- b3/
+|   |       |-- cotahist/
+|   |       |-- postgres/
+|   |       |   |-- queries/
+|   |       |   `-- sqlcgen/
+|   |       `-- storage/
 |   `-- infra/
 |       |-- config/
 |       |-- database/
@@ -88,12 +89,12 @@ b3-data-hub/
 - `internal/domain`: entidades e regras independentes de infraestrutura.
 - `internal/application/ports/outbound`: contratos das dependências externas usadas pela aplicação.
 - `internal/application/usecases`: coordenação dos casos de uso da aplicação.
-- `internal/adapters/b3`: download HTTP do arquivo disponibilizado pela B3.
-- `internal/adapters/cotahist`: parser dos registros fixos do arquivo COTAHIST.
-- `internal/adapters/postgres`: implementacao do repositorio de cotacoes.
-- `internal/adapters/postgres/queries`: comandos SQL mantidos manualmente.
-- `internal/adapters/postgres/sqlcgen`: codigo Go tipado gerado pelo sqlc; nao deve ser editado manualmente.
-- `internal/adapters/storage`: armazenamento do ZIP no disco local.
+- `internal/adapters/outbound/b3`: download HTTP do arquivo disponibilizado pela B3.
+- `internal/adapters/outbound/cotahist`: parser dos registros fixos do arquivo COTAHIST.
+- `internal/adapters/outbound/postgres`: implementacao do repositorio de cotacoes.
+- `internal/adapters/outbound/postgres/queries`: comandos SQL mantidos manualmente.
+- `internal/adapters/outbound/postgres/sqlcgen`: codigo Go tipado gerado pelo sqlc; nao deve ser editado manualmente.
+- `internal/adapters/outbound/storage`: armazenamento do ZIP no disco local.
 - `internal/infra/config`: leitura e validacao das variaveis de ambiente.
 - `internal/infra/database`: criacao e verificacao do pool PostgreSQL.
 - `internal/infra/logger`: configuração do logger estruturado da aplicação.
@@ -300,7 +301,7 @@ O teste unitario nao exige PostgreSQL. Para executar o teste real de conexao no 
 ```powershell
 $env:DATABASE_INTEGRATION_TEST = "1"
 $env:DATABASE_URL = "postgres://b3_user:b3_local_password@localhost:5432/b3_data_hub?sslmode=disable"
-go test ./internal/adapters/postgres -run TestNewPoolIntegration -v
+go test ./internal/adapters/outbound/postgres -run TestNewPoolIntegration -v
 ```
 ### Migrations iniciais
 
@@ -404,10 +405,10 @@ Os dados sao armazenados em:
 Os comandos de controle da importacao (`SELECT`, `INSERT`, `UPDATE` e `DELETE`) ficam em:
 
 ```text
-internal/adapters/postgres/queries/historical_imports.sql
+internal/adapters/outbound/postgres/queries/historical_imports.sql
 ```
 
-O `sqlc.yaml` usa as migrations como schema e gera os tipos e metodos do adapter em `internal/adapters/postgres/sqlcgen`. Depois de alterar uma migration ou query, regenere o pacote:
+O `sqlc.yaml` usa as migrations como schema e gera os tipos e metodos do adapter em `internal/adapters/outbound/postgres/sqlcgen`. Depois de alterar uma migration ou query, regenere o pacote:
 
 ```powershell
 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate

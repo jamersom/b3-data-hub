@@ -34,6 +34,7 @@ func (s *HistoricalQuoteSource) Download(ctx context.Context, year int) (domain.
 	if err != nil {
 		return domain.HistoricalFile{}, fmt.Errorf("request B3: %w", err)
 	}
+	
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
