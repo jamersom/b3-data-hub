@@ -4,13 +4,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamersom/b3-data-hub/internal/core/domain"
-	"github.com/jamersom/b3-data-hub/internal/core/ports"
+	"github.com/jamersom/b3-data-hub/internal/application/ports/outbound"
+	"github.com/jamersom/b3-data-hub/internal/domain"
 )
 
 func TestNewHistoricalQuoteRow(t *testing.T) {
 	expirationDate := time.Date(2027, time.June, 21, 0, 0, 0, 0, time.UTC)
-	record := ports.HistoricalQuoteRecord{
+	record := outbound.HistoricalQuoteRecord{
 		LineNumber: 42,
 		Quote: domain.HistoricalQuote{
 			TradingDate: time.Date(2026, time.August, 10, 0, 0, 0, 0, time.UTC),

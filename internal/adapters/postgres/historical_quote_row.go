@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jamersom/b3-data-hub/internal/core/ports"
+	"github.com/jamersom/b3-data-hub/internal/application/ports/outbound"
 )
 
 var historicalQuoteColumns = []string{
@@ -46,7 +46,7 @@ type historicalQuoteRow struct {
 	DistributionNumber int
 }
 
-func newHistoricalQuoteRow(importID int64, record ports.HistoricalQuoteRecord) historicalQuoteRow {
+func newHistoricalQuoteRow(importID int64, record outbound.HistoricalQuoteRecord) historicalQuoteRow {
 	quote := record.Quote
 
 	return historicalQuoteRow{

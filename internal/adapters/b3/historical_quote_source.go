@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/jamersom/b3-data-hub/internal/core/domain"
+	"github.com/jamersom/b3-data-hub/internal/domain"
 )
 
 const historicalURLPattern = "https://bvmf.bmfbovespa.com.br/InstDados/SerHist/COTAHIST_A%d.ZIP"

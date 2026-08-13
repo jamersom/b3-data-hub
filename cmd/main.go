@@ -13,7 +13,7 @@ import (
 	"github.com/jamersom/b3-data-hub/internal/adapters/cotahist"
 	"github.com/jamersom/b3-data-hub/internal/adapters/postgres"
 	"github.com/jamersom/b3-data-hub/internal/adapters/storage"
-	"github.com/jamersom/b3-data-hub/internal/core/services"
+	"github.com/jamersom/b3-data-hub/internal/application/usecases"
 	"github.com/jamersom/b3-data-hub/internal/infra/config"
 	"github.com/jamersom/b3-data-hub/internal/infra/database"
 	applicationlogger "github.com/jamersom/b3-data-hub/internal/infra/logger"
@@ -56,7 +56,7 @@ func run(logger *slog.Logger) error {
 	fileStore := storage.NewLocalFileStore("./data")
 	parser := cotahist.NewParser()
 	repository := postgres.NewHistoricalQuoteRepository(databasePool)
-	importer := services.NewImportHistoricalQuotesService(source, fileStore, parser, repository, logger)
+	importer := usecases.NewImportHistoricalQuotesService(source, fileStore, parser, repository, logger)
 
 	year := time.Now().Year()
 	if len(os.Args) > 1 {

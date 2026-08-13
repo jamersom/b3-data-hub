@@ -1,3 +1,4 @@
+// Package domain contains the business entities and rules.
 package domain
 
 import "fmt"

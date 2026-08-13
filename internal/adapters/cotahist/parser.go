@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jamersom/b3-data-hub/internal/core/domain"
-	"github.com/jamersom/b3-data-hub/internal/core/ports"
+	"github.com/jamersom/b3-data-hub/internal/application/ports/outbound"
+	"github.com/jamersom/b3-data-hub/internal/domain"
 )
 
 const detailRecordLength = 245
@@ -23,7 +23,7 @@ type Parser struct{}
 
 func NewParser() *Parser { return &Parser{} }
 
-func (p *Parser) Parse(ctx context.Context, file domain.HistoricalFile, consume func(ports.HistoricalQuoteRecord) error) error {
+func (p *Parser) Parse(ctx context.Context, file domain.HistoricalFile, consume func(outbound.HistoricalQuoteRecord) error) error {
 	archive, err := zip.NewReader(bytes.NewReader(file.Data), int64(len(file.Data)))
 	if err != nil {
 		return fmt.Errorf("open COTAHIST ZIP: %w", err)
@@ -60,7 +60,7 @@ func (p *Parser) Parse(ctx context.Context, file domain.HistoricalFile, consume 
 		if quote.TradingDate.Year() != file.Year {
 			return fmt.Errorf("line %d belongs to year %d, expected %d", lineNumber, quote.TradingDate.Year(), file.Year)
 		}
-		if err := consume(ports.HistoricalQuoteRecord{LineNumber: lineNumber, Quote: quote}); err != nil {
+		if err := consume(outbound.HistoricalQuoteRecord{LineNumber: lineNumber, Quote: quote}); err != nil {
 			return fmt.Errorf("consume COTAHIST line %d: %w", lineNumber, err)
 		}
 	}
@@ -195,4 +195,4 @@ func parseDate(value string, nullable bool) (*time.Time, error) {
 	return &parsed, nil
 }
 
-var _ ports.HistoricalQuoteParser = (*Parser)(nil)
+var _ outbound.HistoricalQuoteParser = (*Parser)(nil)
