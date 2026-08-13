@@ -12,7 +12,7 @@ import (
 	"github.com/jamersom/b3-data-hub/internal/core/ports"
 )
 
-const quoteBatchSize = 2000
+const quoteBatchSize = 10000
 
 type ImportHistoricalQuotesService struct {
 	source     ports.HistoricalQuoteSource
