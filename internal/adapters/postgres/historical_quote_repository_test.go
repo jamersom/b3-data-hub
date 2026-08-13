@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jamersom/b3-data-hub/internal/application/ports"
+	"github.com/jamersom/b3-data-hub/internal/core/ports"
 )
 
 func TestBeginImportRejectsReferenceYearOutsideDatabaseRange(t *testing.T) {

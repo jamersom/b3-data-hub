@@ -2,7 +2,7 @@
 
 Projeto em Go para baixar, validar e armazenar arquivos de cotacoes historicas disponibilizados pela B3.
 
-O projeto utiliza uma arquitetura inspirada em Ports and Adapters (arquitetura hexagonal), mantendo regras de dominio e casos de uso separados de HTTP e armazenamento.
+O projeto utiliza Ports and Adapters (arquitetura hexagonal) em uma estrutura enxuta: o caso de uso, o dominio e suas portas ficam agrupados por funcionalidade, enquanto as integracoes externas permanecem em adapters.
 
 ## Fluxo de importacao
 
@@ -29,7 +29,7 @@ ImportHistoricalQuotesService
         +--> HistoricalFile.Validate()
         |          |
         |          v
-        |        domain
+        |    importquotes
         |
         +--> FileStore (port)
                    |
@@ -37,7 +37,7 @@ ImportHistoricalQuotesService
           adapter/storage -> disco local
 ```
 
-As interfaces em `internal/application/ports` descrevem o que o caso de uso necessita. Os tipos em `internal/adapters` fornecem as implementacoes concretas.
+As interfaces em `internal/core/ports` descrevem o que os casos de uso necessitam. O dominio permanece independente em `internal/core/domain`, e os tipos em `internal/adapters` fornecem as implementacoes concretas.
 
 ## Estrutura
 
@@ -46,9 +46,10 @@ b3-data-hub/
 |-- cmd/
 |   `-- main.go
 |-- internal/
-|   |-- domain/
-|   |-- application/
-|   |   `-- ports/
+|   |-- core/
+|   |   |-- domain/
+|   |   |-- ports/
+|   |   `-- services/
 |   |-- adapters/
 |   |   |-- b3/
 |   |   |-- cotahist/
@@ -68,9 +69,9 @@ b3-data-hub/
 ### Responsabilidades
 
 - `cmd`: ponto de entrada e composicao das dependencias.
-- `internal/domain`: entidades e regras independentes de infraestrutura.
-- `internal/application`: caso de uso e coordenacao da importacao.
-- `internal/application/ports`: contratos consumidos pela aplicacao.
+- `internal/core/domain`: entidades e regras independentes de infraestrutura.
+- `internal/core/ports`: contratos que conectam o core aos adapters.
+- `internal/core/services`: coordenacao dos casos de uso da aplicacao.
 - `internal/adapters/b3`: download HTTP do arquivo disponibilizado pela B3.
 - `internal/adapters/cotahist`: parser dos registros fixos do arquivo COTAHIST.
 - `internal/adapters/postgres`: implementacao do repositorio de cotacoes.

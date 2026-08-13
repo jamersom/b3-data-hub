@@ -1,4 +1,4 @@
-package application
+package services
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jamersom/b3-data-hub/internal/application/ports"
+	"github.com/jamersom/b3-data-hub/internal/core/ports"
 )
 
 const quoteBatchSize = 2000

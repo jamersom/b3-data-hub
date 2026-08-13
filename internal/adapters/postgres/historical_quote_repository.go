@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jamersom/b3-data-hub/internal/adapters/postgres/sqlcgen"
-	"github.com/jamersom/b3-data-hub/internal/application/ports"
+	"github.com/jamersom/b3-data-hub/internal/core/ports"
 )
 
 type HistoricalQuoteRepository struct {

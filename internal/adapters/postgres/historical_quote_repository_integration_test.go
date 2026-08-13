@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamersom/b3-data-hub/internal/application/ports"
-	"github.com/jamersom/b3-data-hub/internal/domain"
+	"github.com/jamersom/b3-data-hub/internal/core/domain"
+	"github.com/jamersom/b3-data-hub/internal/core/ports"
 	"github.com/jamersom/b3-data-hub/internal/infra/config"
 	"github.com/jamersom/b3-data-hub/internal/infra/database"
 )

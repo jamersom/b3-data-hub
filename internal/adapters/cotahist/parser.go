@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jamersom/b3-data-hub/internal/application/ports"
-	"github.com/jamersom/b3-data-hub/internal/domain"
+	"github.com/jamersom/b3-data-hub/internal/core/domain"
+	"github.com/jamersom/b3-data-hub/internal/core/ports"
 )
 
 const detailRecordLength = 245

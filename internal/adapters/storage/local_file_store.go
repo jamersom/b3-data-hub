@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jamersom/b3-data-hub/internal/domain"
+	"github.com/jamersom/b3-data-hub/internal/core/domain"
 )
 
 type LocalFileStore struct {
