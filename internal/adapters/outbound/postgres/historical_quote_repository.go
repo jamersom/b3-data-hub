@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jamersom/b3-data-hub/internal/adapters/postgres/sqlcgen"
-	"github.com/jamersom/b3-data-hub/internal/application/ports"
+	"github.com/jamersom/b3-data-hub/internal/adapters/outbound/postgres/sqlcgen"
+	"github.com/jamersom/b3-data-hub/internal/application/ports/outbound"
 )
 
 type HistoricalQuoteRepository struct {
@@ -24,19 +24,19 @@ func NewHistoricalQuoteRepository(pool *pgxpool.Pool) *HistoricalQuoteRepository
 	}
 }
 
-func (r *HistoricalQuoteRepository) BeginImport(ctx context.Context, input ports.HistoricalImportInput) (ports.HistoricalImport, error) {
+func (r *HistoricalQuoteRepository) BeginImport(ctx context.Context, input outbound.HistoricalImportInput) (outbound.HistoricalImport, error) {
 	if input.ReferenceYear < 1986 || input.ReferenceYear > math.MaxInt16 {
-		return ports.HistoricalImport{}, fmt.Errorf("reference year must be between 1986 and %d", math.MaxInt16)
+		return outbound.HistoricalImport{}, fmt.Errorf("reference year must be between 1986 and %d", math.MaxInt16)
 	}
 
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return ports.HistoricalImport{}, fmt.Errorf("begin import transaction: %w", err)
+		return outbound.HistoricalImport{}, fmt.Errorf("begin import transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 	queries := r.queries.WithTx(tx)
 
-	var existing ports.HistoricalImport
+	var existing outbound.HistoricalImport
 	found, err := queries.GetHistoricalImportForUpdate(ctx, input.FileSHA256)
 
 	switch {
@@ -47,36 +47,36 @@ func (r *HistoricalQuoteRepository) BeginImport(ctx context.Context, input ports
 			FileSha256:    input.FileSHA256,
 		})
 		if err != nil {
-			return ports.HistoricalImport{}, fmt.Errorf("insert historical import: %w", err)
+			return outbound.HistoricalImport{}, fmt.Errorf("insert historical import: %w", err)
 		}
 	case err != nil:
-		return ports.HistoricalImport{}, fmt.Errorf("find historical import: %w", err)
+		return outbound.HistoricalImport{}, fmt.Errorf("find historical import: %w", err)
 	case found.Status == "completed":
 		existing.ID = found.ID
 		existing.TotalRecords = found.TotalRecords
 		existing.AlreadyCompleted = true
 		if err := tx.Commit(ctx); err != nil {
-			return ports.HistoricalImport{}, fmt.Errorf("commit existing import: %w", err)
+			return outbound.HistoricalImport{}, fmt.Errorf("commit existing import: %w", err)
 		}
 		return existing, nil
 	default:
 		existing.ID = found.ID
 		existing.TotalRecords = found.TotalRecords
 		if err := queries.DeleteHistoricalQuotesByImportID(ctx, existing.ID); err != nil {
-			return ports.HistoricalImport{}, fmt.Errorf("clear previous import quotes: %w", err)
+			return outbound.HistoricalImport{}, fmt.Errorf("clear previous import quotes: %w", err)
 		}
 		if err := queries.RestartHistoricalImport(ctx, existing.ID); err != nil {
-			return ports.HistoricalImport{}, fmt.Errorf("restart historical import: %w", err)
+			return outbound.HistoricalImport{}, fmt.Errorf("restart historical import: %w", err)
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return ports.HistoricalImport{}, fmt.Errorf("commit import start: %w", err)
+		return outbound.HistoricalImport{}, fmt.Errorf("commit import start: %w", err)
 	}
 	return existing, nil
 }
 
-func (r *HistoricalQuoteRepository) InsertBatch(ctx context.Context, importID int64, records []ports.HistoricalQuoteRecord) error {
+func (r *HistoricalQuoteRepository) InsertBatch(ctx context.Context, importID int64, records []outbound.HistoricalQuoteRecord) error {
 	if len(records) == 0 {
 		return nil
 	}
@@ -131,4 +131,4 @@ func (r *HistoricalQuoteRepository) FailImport(ctx context.Context, importID int
 	return nil
 }
 
-var _ ports.HistoricalQuoteRepository = (*HistoricalQuoteRepository)(nil)
+var _ outbound.HistoricalQuoteRepository = (*HistoricalQuoteRepository)(nil)

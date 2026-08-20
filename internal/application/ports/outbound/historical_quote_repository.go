@@ -1,8 +1,6 @@
-package ports
+package outbound
 
-import (
-	"context"
-)
+import "context"
 
 type HistoricalImportInput struct {
 	ReferenceYear int
@@ -16,6 +14,7 @@ type HistoricalImport struct {
 	TotalRecords     int64
 }
 
+// HistoricalQuoteRepository is the output port used by the import service.
 type HistoricalQuoteRepository interface {
 	BeginImport(ctx context.Context, input HistoricalImportInput) (HistoricalImport, error)
 	InsertBatch(ctx context.Context, importID int64, records []HistoricalQuoteRecord) error

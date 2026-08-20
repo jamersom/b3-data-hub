@@ -4,18 +4,20 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"os"
 	"testing"
 
-	"github.com/jamersom/b3-data-hub/internal/application/ports"
+	"github.com/jamersom/b3-data-hub/internal/application/ports/outbound"
 	"github.com/jamersom/b3-data-hub/internal/domain"
 )
 
 func TestParserParsesDetailRecord(t *testing.T) {
 	line := "012026010734MACY34      010MACY S      DRN          R$  000000001263800000000126380000000012300000000001243900000000123000000000000001000000001350000003000000000000000011000000000000136838000000000000009999123100000010000000000000BRMACYBDR000134"
-	file := domain.HistoricalFile{Year: 2026, FileName: "COTAHIST_A2026.ZIP", Data: zipData(t, line)}
+	path := writeZIP(t, zipData(t, line))
+	file := domain.HistoricalFile{Year: 2026, FileName: "COTAHIST_A2026.ZIP", Path: path}
 
-	var records []ports.HistoricalQuoteRecord
-	err := NewParser().Parse(context.Background(), file, func(record ports.HistoricalQuoteRecord) error {
+	var records []outbound.HistoricalQuoteRecord
+	err := NewParser().Parse(context.Background(), file, func(record outbound.HistoricalQuoteRecord) error {
 		records = append(records, record)
 		return nil
 	})
@@ -43,6 +45,15 @@ func TestParserParsesDetailRecord(t *testing.T) {
 	if quote.ISIN != "BRMACYBDR000" {
 		t.Fatalf("unexpected ISIN %q", quote.ISIN)
 	}
+}
+
+func writeZIP(t *testing.T, data []byte) string {
+	t.Helper()
+	path := t.TempDir() + "/cotahist.zip"
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write ZIP fixture: %v", err)
+	}
+	return path
 }
 
 func zipData(t *testing.T, detail string) []byte {
