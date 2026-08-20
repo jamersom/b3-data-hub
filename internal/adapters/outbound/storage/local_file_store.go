@@ -27,13 +27,7 @@ func (s *LocalFileStore) Save(ctx context.Context, file domain.HistoricalFile) (
 	}
 
 	path := filepath.Join(s.baseDir, file.FileName)
-	tmpPath := path + ".part"
-
-	if err := os.WriteFile(tmpPath, file.Data, 0o644); err != nil {
-		return "", fmt.Errorf("write temporary file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := os.Rename(file.Path, path); err != nil {
 		return "", fmt.Errorf("commit file: %w", err)
 	}
 

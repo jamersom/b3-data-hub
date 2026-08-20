@@ -2,14 +2,20 @@ package b3
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	"github.com/jamersom/b3-data-hub/internal/domain"
 )
 
-const historicalURLPattern = "https://bvmf.bmfbovespa.com.br/InstDados/SerHist/COTAHIST_A%d.ZIP"
+const (
+	historicalURLPattern = "https://bvmf.bmfbovespa.com.br/InstDados/SerHist/COTAHIST_A%d.ZIP"
+	maxResponseSize      = 512 << 20
+)
 
 type HistoricalQuoteSource struct {
 	client *http.Client
@@ -34,22 +40,83 @@ func (s *HistoricalQuoteSource) Download(ctx context.Context, year int) (domain.
 	if err != nil {
 		return domain.HistoricalFile{}, fmt.Errorf("request B3: %w", err)
 	}
-	
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return domain.HistoricalFile{}, fmt.Errorf("B3 returned HTTP %d", resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 512<<20))
+	file, err := downloadToTemporaryFile(resp.Body, maxResponseSize)
 	if err != nil {
 		return domain.HistoricalFile{}, fmt.Errorf("read B3 response: %w", err)
 	}
 
-	return domain.HistoricalFile{
+	historicalFile := domain.HistoricalFile{
 		Year:        year,
 		FileName:    fmt.Sprintf("COTAHIST_A%d.ZIP", year),
 		ContentType: resp.Header.Get("Content-Type"),
-		Data:        data,
-	}, nil
+		Path:        file.path,
+		Size:        file.size,
+		SHA256:      file.sha256,
+		Header:      file.header,
+	}
+
+	if err := historicalFile.Validate(); err != nil {
+		_ = os.Remove(file.path)
+		return domain.HistoricalFile{}, err
+	}
+
+	return historicalFile, nil
+}
+
+type temporaryDownload struct {
+	path   string
+	size   int64
+	sha256 string
+	header []byte
+}
+
+func downloadToTemporaryFile(reader io.Reader, maxSize int64) (result temporaryDownload, err error) {
+	temp, err := os.CreateTemp("", "b3-data-hub-*.zip.part")
+	if err != nil {
+		return result, fmt.Errorf("create temporary file: %w", err)
+	}
+
+	path := temp.Name()
+
+	defer func() {
+		if closeErr := temp.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+		if err != nil {
+			_ = os.Remove(path)
+		}
+	}()
+
+	hash := sha256.New()
+	limited := &io.LimitedReader{R: reader, N: maxSize + 1}
+	size, err := io.Copy(io.MultiWriter(temp, hash), limited)
+
+	if err != nil {
+		return result, err
+	}
+
+	if size > maxSize {
+		return result, fmt.Errorf("response exceeds the %d-byte limit", maxSize)
+	}
+
+	if _, err := temp.Seek(0, io.SeekStart); err != nil {
+		return result, fmt.Errorf("seek temporary file: %w", err)
+	}
+
+	header := make([]byte, 4)
+	if _, err := io.ReadFull(temp, header); err != nil {
+		return result, fmt.Errorf("read temporary file header: %w", err)
+	}
+
+	return temporaryDownload{
+		path:   path,
+		size:   size,
+		sha256: hex.EncodeToString(hash.Sum(nil)),
+		header: header}, nil
 }

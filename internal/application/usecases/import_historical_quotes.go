@@ -2,8 +2,6 @@ package usecases
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -104,7 +102,7 @@ func (s *ImportHistoricalQuotesService) prepareHistoricalFile(ctx context.Contex
 	}
 	logger.InfoContext(ctx, "historical file downloaded",
 		slog.String("file_name", file.FileName),
-		slog.Int("size_bytes", len(file.Data)),
+		slog.Int64("size_bytes", file.Size),
 		slog.Duration("duration", time.Since(downloadStartedAt)),
 	)
 	if err := file.Validate(); err != nil {
@@ -116,18 +114,17 @@ func (s *ImportHistoricalQuotesService) prepareHistoricalFile(ctx context.Contex
 		return preparedHistoricalFile{}, fmt.Errorf("save historical file: %w", err)
 	}
 
-	checksum := sha256.Sum256(file.Data)
-	checksumText := hex.EncodeToString(checksum[:])
 	logger.InfoContext(ctx, "historical file stored",
 		slog.String("file_name", file.FileName),
 		slog.String("file_path", path),
-		slog.String("file_sha256", checksumText),
+		slog.String("file_sha256", file.SHA256),
 	)
+	file.Path = path
 
 	return preparedHistoricalFile{
 		file:     file,
-		result:   ImportResult{FilePath: path, Size: int64(len(file.Data))},
-		checksum: checksumText,
+		result:   ImportResult{FilePath: path, Size: file.Size},
+		checksum: file.SHA256,
 	}, nil
 }
 

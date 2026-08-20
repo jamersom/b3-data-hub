@@ -7,17 +7,20 @@ type HistoricalFile struct {
 	Year        int
 	FileName    string
 	ContentType string
-	Data        []byte
+	Path        string
+	Size        int64
+	SHA256      string
+	Header      []byte
 }
 
 func (f HistoricalFile) Validate() error {
 	if f.Year < 1986 {
 		return fmt.Errorf("historical data is unavailable for year %d", f.Year)
 	}
-	if len(f.Data) < 4 {
+	if f.Size < 4 || len(f.Header) < 4 {
 		return fmt.Errorf("historical file is too small")
 	}
-	if !isZIP(f.Data[:4]) {
+	if !isZIP(f.Header[:4]) {
 		return fmt.Errorf("historical file is not a valid ZIP payload")
 	}
 	return nil

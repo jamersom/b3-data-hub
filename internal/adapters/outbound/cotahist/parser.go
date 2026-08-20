@@ -3,7 +3,6 @@ package cotahist
 import (
 	"archive/zip"
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -24,10 +23,12 @@ type Parser struct{}
 func NewParser() *Parser { return &Parser{} }
 
 func (p *Parser) Parse(ctx context.Context, file domain.HistoricalFile, consume func(outbound.HistoricalQuoteRecord) error) error {
-	archive, err := zip.NewReader(bytes.NewReader(file.Data), int64(len(file.Data)))
+	archive, err := zip.OpenReader(file.Path)
 	if err != nil {
 		return fmt.Errorf("open COTAHIST ZIP: %w", err)
 	}
+
+	defer archive.Close()
 
 	entry := findTXTEntry(archive.File)
 	if entry == nil {

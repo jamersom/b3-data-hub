@@ -165,7 +165,7 @@ go vet ./...
 
 - validar a integridade completa do ZIP com `archive/zip`;
 - detectar respostas maiores que o limite configurado;
-- fazer download em streaming, sem manter todo o ZIP em memoria;
+- permitir configurar o limite máximo do download por ambiente;
 - implementar retry com backoff para falhas transitorias;
 - disponibilizar uma API REST para consultas;
 - executar importacoes automaticas por agendamento.
@@ -369,6 +369,8 @@ O parser:
 - respeita cancelamento e timeout por `context.Context`.
 
 O TXT descompactado e processado linha por linha. Ele nao e carregado por inteiro na memoria.
+
+O download do ZIP também é feito em streaming para um arquivo temporário. Durante a cópia, a aplicação calcula o SHA-256 e rejeita respostas acima de 512 MiB. Depois da validação, o arquivo temporário é movido para `data`, evitando manter o ZIP completo na memória.
 
 ### Controle da importacao
 
