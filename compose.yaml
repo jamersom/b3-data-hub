@@ -7,6 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./migrations/001_create_historical_quotes.up.sql:/docker-entrypoint-initdb.d/001_create_historical_quotes.sql:ro
     networks:
       - b3_data_hub
     healthcheck:
@@ -28,6 +29,41 @@ services:
         delay: 5s
         max_attempts: 5
         window: 120s
+
+  migrate:
+    image: postgres:17-alpine
+    environment:
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      PGDATABASE: ${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - sh
+      - -c
+      - |
+        until pg_isready -h postgres; do
+          echo "waiting for PostgreSQL"
+          sleep 2
+        done
+
+        if [ "$$(psql -h postgres -tAc "SELECT to_regclass('public.historical_quotes') IS NOT NULL")" = "t" ]; then
+          echo "migration 001 already applied"
+          exit 0
+        fi
+
+        psql \
+          -h postgres \
+          -v ON_ERROR_STOP=1 \
+          --single-transaction \
+          -f /migrations/001_create_historical_quotes.up.sql
+    networks:
+      - b3_data_hub
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: none
 
   importer-scheduler:
     image: ghcr.io/jamersom/b3-data-hub:${IMAGE_TAG:-latest}
