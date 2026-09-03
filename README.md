@@ -78,7 +78,8 @@ b3-data-hub/
 |       |-- database/
 |       `-- logger/
 |-- migrations/
-|-- compose.yaml
+|-- docker-compose.yml
+|-- docker-stack.yml
 |-- go.mod
 `-- README.md
 ```
@@ -172,7 +173,7 @@ go vet ./...
 
 ## PostgreSQL com Docker
 
-O ambiente local utiliza PostgreSQL 17 e e configurado pelo arquivo `compose.yaml`.
+O ambiente local utiliza PostgreSQL 17 e e configurado pelo arquivo `docker-compose.yml`.
 
 Copie o arquivo de exemplo quando `.env` ainda nao existir:
 
