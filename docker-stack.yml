@@ -43,6 +43,8 @@ services:
     configs:
       - source: historical_migration
         target: /migrations/001_create_historical_quotes.up.sql
+      - source: publish_versions_migration
+        target: /migrations/002_publish_import_versions.up.sql
     command:
       - sh
       - -c
@@ -55,12 +57,21 @@ services:
 
         echo "PostgreSQL disponível. Executando migration..."
 
+        if [ "$$(psql -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -tAc "SELECT to_regclass('public.historical_imports') IS NULL")" = "t" ]; then
+          psql \
+            -h postgres \
+            -U "$$POSTGRES_USER" \
+            -d "$$POSTGRES_DB" \
+            -v ON_ERROR_STOP=1 \
+            -f /migrations/001_create_historical_quotes.up.sql
+        fi
+
         psql \
           -h postgres \
           -U "$$POSTGRES_USER" \
           -d "$$POSTGRES_DB" \
           -v ON_ERROR_STOP=1 \
-          -f /migrations/001_create_historical_quotes.up.sql
+          -f /migrations/002_publish_import_versions.up.sql
 
         echo "Migration concluída com sucesso."
     networks:
@@ -112,3 +123,5 @@ networks:
 configs:
   historical_migration:
     file: ./migrations/001_create_historical_quotes.up.sql
+  publish_versions_migration:
+    file: ./migrations/002_publish_import_versions.up.sql

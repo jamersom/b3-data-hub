@@ -9,32 +9,12 @@ import (
 	"context"
 )
 
-const completeHistoricalImport = `-- name: CompleteHistoricalImport :execrows
-UPDATE historical_imports
-SET status = 'completed',
-    total_records = $2,
-    completed_at = NOW(),
-    error_message = NULL
-WHERE id = $1
-  AND status = 'processing'
-`
-
-type CompleteHistoricalImportParams struct {
-	ID           int64
-	TotalRecords int64
-}
-
-func (q *Queries) CompleteHistoricalImport(ctx context.Context, arg CompleteHistoricalImportParams) (int64, error) {
-	result, err := q.db.Exec(ctx, completeHistoricalImport, arg.ID, arg.TotalRecords)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const createHistoricalImport = `-- name: CreateHistoricalImport :one
-INSERT INTO historical_imports (reference_year, file_name, file_sha256, status)
-VALUES ($1, $2, $3, 'processing')
+INSERT INTO historical_imports (
+    reference_year, file_name, file_sha256, file_size,
+    source_url, parser_version, layout_version, status
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'processing')
 RETURNING id
 `
 
@@ -42,10 +22,14 @@ type CreateHistoricalImportParams struct {
 	ReferenceYear int16
 	FileName      string
 	FileSha256    string
+	FileSize      int64
+	SourceUrl     string
+	ParserVersion string
+	LayoutVersion string
 }
 
 func (q *Queries) CreateHistoricalImport(ctx context.Context, arg CreateHistoricalImportParams) (int64, error) {
-	row := q.db.QueryRow(ctx, createHistoricalImport, arg.ReferenceYear, arg.FileName, arg.FileSha256)
+	row := q.db.QueryRow(ctx, createHistoricalImport, arg.ReferenceYear, arg.FileName, arg.FileSha256, arg.FileSize, arg.SourceUrl, arg.ParserVersion, arg.LayoutVersion)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -105,7 +89,9 @@ SET status = 'processing',
     total_records = 0,
     error_message = NULL,
     started_at = NOW(),
-    completed_at = NULL
+    completed_at = NULL,
+    published_at = NULL,
+    superseded_at = NULL
 WHERE id = $1
 `
 

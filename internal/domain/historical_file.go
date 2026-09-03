@@ -10,6 +10,7 @@ type HistoricalFile struct {
 	Path        string
 	Size        int64
 	SHA256      string
+	SourceURL   string
 	Header      []byte
 }
 

@@ -16,7 +16,8 @@ A importacao segue estas etapas:
 6. `HistoricalQuoteRepository` registra a importação no PostgreSQL.
 7. `HistoricalQuoteParser` interpreta os registros do arquivo COTAHIST.
 8. As cotações são persistidas em lotes pelo adapter PostgreSQL.
-9. O caso de uso conclui a importação e retorna o resultado do processamento.
+9. O caso de uso valida header, trailer, contagem e regras do domínio.
+10. A nova versão anual é publicada atomicamente e substitui a versão anterior.
 
 ```text
 cmd/main.go
@@ -367,6 +368,10 @@ O parser:
 - converte `00000000` e `99991231` em vencimento nulo;
 - mantem valores financeiros como inteiros escalados, evitando perda de precisao com `float64`;
 - verifica se o ano das cotacoes corresponde ao ano do arquivo;
+- valida a correspondencia entre header e trailer e a contagem declarada de registros;
+- normaliza ticker e ISIN para maiusculas e converte a moeda `R$` para `BRL`;
+- valida campos obrigatorios e a coerencia dos precos de abertura, maxima, minima e fechamento;
+- calcula um SHA-256 para cada registro de detalhe;
 - respeita cancelamento e timeout por `context.Context`.
 
 O TXT descompactado e processado linha por linha. Ele nao e carregado por inteiro na memoria.
@@ -380,12 +385,14 @@ Depois de validar e salvar o ZIP, a aplicacao calcula o SHA-256 e registra o pro
 A importacao:
 
 - inicia com status `processing`;
-- termina com status `completed` e a quantidade de registros;
+- termina com status `published` e a quantidade de registros;
 - recebe status `failed` e a mensagem do erro em caso de falha;
-- reconhece um arquivo concluido pelo mesmo SHA-256 e evita processa-lo novamente;
-- limpa linhas parciais e reinicia o lote quando o mesmo arquivo havia falhado anteriormente.
+- reconhece um arquivo publicado pelo mesmo SHA-256 e evita processa-lo novamente;
+- limpa linhas parciais quando uma importacao falha;
+- mantem a versao anual anterior publicada enquanto a nova versao esta em processamento;
+- publica a nova versao em uma transacao, remove as cotacoes substituidas e marca a importacao anterior como `superseded`.
 
-Cada cotacao guarda `import_id` e `line_number`, permitindo identificar o arquivo e a linha que originaram o registro.
+Cada cotacao guarda `import_id`, `line_number` e `record_sha256`, permitindo identificar o arquivo, a linha de origem e registros repetidos dentro da mesma importacao. A view `published_historical_quotes` expoe somente a versao anual publicada e deve ser usada por servicos de consulta.
 
 ### Gravacao em lote
 
@@ -430,7 +437,7 @@ go run ./cmd 2026
 Consulte o lote criado:
 
 ```sql
-SELECT id, reference_year, status, total_records, completed_at
+SELECT id, reference_year, status, total_records, completed_at, published_at
 FROM historical_imports
 ORDER BY id DESC;
 ```
@@ -439,7 +446,7 @@ Consulte as cotacoes de um ticker:
 
 ```sql
 SELECT trading_date, ticker, open_price, high_price, low_price, close_price
-FROM historical_quotes
+FROM published_historical_quotes
 WHERE ticker = 'PETR4'
 ORDER BY trading_date DESC
 LIMIT 20;

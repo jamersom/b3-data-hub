@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,14 +36,22 @@ func TestHistoricalQuoteRepositoryIntegration(t *testing.T) {
 	})
 
 	repository := NewHistoricalQuoteRepository(pool)
-	batch, err := repository.BeginImport(ctx, outbound.HistoricalImportInput{ReferenceYear: 2026, FileName: "test.zip", FileSHA256: checksum})
+	batch, err := repository.BeginImport(ctx, outbound.HistoricalImportInput{
+		ReferenceYear: 2999,
+		FileName:      "test.zip",
+		FileSHA256:    checksum,
+		FileSize:      1024,
+		SourceURL:     "https://example.test/test.zip",
+		ParserVersion: "test",
+		LayoutVersion: "test",
+	})
 	if err != nil {
 		t.Fatalf("begin import: %v", err)
 	}
 	date := time.Date(2026, 1, 7, 0, 0, 0, 0, time.UTC)
-	record := outbound.HistoricalQuoteRecord{LineNumber: 2, Quote: domain.HistoricalQuote{
+	record := outbound.HistoricalQuoteRecord{LineNumber: 2, RecordSHA256: strings.Repeat("b", 64), Quote: domain.HistoricalQuote{
 		TradingDate: date, BDICode: "34", Ticker: "MACY34", MarketType: 10,
-		ShortName: "MACY S", Specification: "DRN", Currency: "R$", OpenPriceCents: 12638,
+		ShortName: "MACY S", Specification: "DRN", Currency: "BRL", OpenPriceCents: 12638,
 		HighPriceCents: 12638, LowPriceCents: 12300, AveragePriceCents: 12439,
 		ClosePriceCents: 12300, BestBidPriceCents: 100, BestAskPriceCents: 13500,
 		TradeCount: 3, TradedQuantity: 11, TradedVolumeCents: 136838,
@@ -51,8 +60,8 @@ func TestHistoricalQuoteRepositoryIntegration(t *testing.T) {
 	if err := repository.InsertBatch(ctx, batch.ID, []outbound.HistoricalQuoteRecord{record}); err != nil {
 		t.Fatalf("insert batch: %v", err)
 	}
-	if err := repository.CompleteImport(ctx, batch.ID, 1); err != nil {
-		t.Fatalf("complete import: %v", err)
+	if err := repository.PublishImport(ctx, batch.ID, 1); err != nil {
+		t.Fatalf("publish import: %v", err)
 	}
 
 	var ticker string
@@ -64,11 +73,11 @@ func TestHistoricalQuoteRepositoryIntegration(t *testing.T) {
 		t.Fatalf("unexpected stored quote: ticker=%q open=%q", ticker, openPrice)
 	}
 
-	replayed, err := repository.BeginImport(ctx, outbound.HistoricalImportInput{ReferenceYear: 2026, FileName: "test.zip", FileSHA256: checksum})
+	replayed, err := repository.BeginImport(ctx, outbound.HistoricalImportInput{ReferenceYear: 2999, FileName: "test.zip", FileSHA256: checksum})
 	if err != nil {
 		t.Fatalf("replay import: %v", err)
 	}
-	if !replayed.AlreadyCompleted || replayed.TotalRecords != 1 {
-		t.Fatalf("expected completed replay, got %+v", replayed)
+	if !replayed.AlreadyPublished || replayed.TotalRecords != 1 {
+		t.Fatalf("expected published replay, got %+v", replayed)
 	}
 }
