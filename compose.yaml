@@ -7,7 +7,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations/001_create_historical_quotes.up.sql:/docker-entrypoint-initdb.d/001_create_historical_quotes.sql:ro
     networks:
       - b3_data_hub
     healthcheck:
@@ -33,30 +32,32 @@ services:
   migrate:
     image: postgres:17-alpine
     environment:
-      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      PGDATABASE: ${POSTGRES_DB:?POSTGRES_DB is required}
-    volumes:
-      - ./migrations:/migrations:ro
+    configs:
+      - source: historical_migration
+        target: /migrations/001_create_historical_quotes.up.sql
     command:
       - sh
       - -c
       - |
-        until pg_isready -h postgres; do
-          echo "waiting for PostgreSQL"
+        echo "Aguardando PostgreSQL..."
+
+        until pg_isready -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"; do
           sleep 2
         done
 
-        if [ "$$(psql -h postgres -tAc "SELECT to_regclass('public.historical_quotes') IS NOT NULL")" = "t" ]; then
-          echo "migration 001 already applied"
-          exit 0
-        fi
+        echo "PostgreSQL disponível. Executando migration..."
 
         psql \
           -h postgres \
+          -U "$$POSTGRES_USER" \
+          -d "$$POSTGRES_DB" \
           -v ON_ERROR_STOP=1 \
-          --single-transaction \
           -f /migrations/001_create_historical_quotes.up.sql
+
+        echo "Migration concluída com sucesso."
     networks:
       - b3_data_hub
     deploy:
@@ -102,3 +103,7 @@ networks:
   b3_data_hub:
     driver: overlay
     attachable: true
+
+configs:
+  historical_migration:
+    file: ./migrations/001_create_historical_quotes.up.sql
