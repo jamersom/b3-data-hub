@@ -41,7 +41,7 @@ services:
     volumes:
       - ./data:/app/data
     depends_on:
-      postgres:
+      postgres
         # condition: service_healthy
     networks:
       - b3_data_hub
