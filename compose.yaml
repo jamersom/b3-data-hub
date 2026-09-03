@@ -1,6 +1,11 @@
 services:
   postgres:
     image: postgres:17-alpine
+    ports:
+      - target: 5432
+        published: 5432
+        protocol: tcp
+        mode: ingress
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
