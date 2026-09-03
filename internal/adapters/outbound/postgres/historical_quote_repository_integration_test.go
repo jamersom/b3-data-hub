@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jamersom/b3-data-hub/internal/application/ports"
+	"github.com/jamersom/b3-data-hub/internal/application/ports/outbound"
 	"github.com/jamersom/b3-data-hub/internal/domain"
 	"github.com/jamersom/b3-data-hub/internal/infra/config"
 	"github.com/jamersom/b3-data-hub/internal/infra/database"
@@ -35,12 +35,12 @@ func TestHistoricalQuoteRepositoryIntegration(t *testing.T) {
 	})
 
 	repository := NewHistoricalQuoteRepository(pool)
-	batch, err := repository.BeginImport(ctx, ports.HistoricalImportInput{ReferenceYear: 2026, FileName: "test.zip", FileSHA256: checksum})
+	batch, err := repository.BeginImport(ctx, outbound.HistoricalImportInput{ReferenceYear: 2026, FileName: "test.zip", FileSHA256: checksum})
 	if err != nil {
 		t.Fatalf("begin import: %v", err)
 	}
 	date := time.Date(2026, 1, 7, 0, 0, 0, 0, time.UTC)
-	record := ports.HistoricalQuoteRecord{LineNumber: 2, Quote: domain.HistoricalQuote{
+	record := outbound.HistoricalQuoteRecord{LineNumber: 2, Quote: domain.HistoricalQuote{
 		TradingDate: date, BDICode: "34", Ticker: "MACY34", MarketType: 10,
 		ShortName: "MACY S", Specification: "DRN", Currency: "R$", OpenPriceCents: 12638,
 		HighPriceCents: 12638, LowPriceCents: 12300, AveragePriceCents: 12439,
@@ -48,7 +48,7 @@ func TestHistoricalQuoteRepositoryIntegration(t *testing.T) {
 		TradeCount: 3, TradedQuantity: 11, TradedVolumeCents: 136838,
 		QuoteFactor: 1, ISIN: "BRMACYBDR000", DistributionNumber: 134,
 	}}
-	if err := repository.InsertBatch(ctx, batch.ID, []ports.HistoricalQuoteRecord{record}); err != nil {
+	if err := repository.InsertBatch(ctx, batch.ID, []outbound.HistoricalQuoteRecord{record}); err != nil {
 		t.Fatalf("insert batch: %v", err)
 	}
 	if err := repository.CompleteImport(ctx, batch.ID, 1); err != nil {
@@ -64,7 +64,7 @@ func TestHistoricalQuoteRepositoryIntegration(t *testing.T) {
 		t.Fatalf("unexpected stored quote: ticker=%q open=%q", ticker, openPrice)
 	}
 
-	replayed, err := repository.BeginImport(ctx, ports.HistoricalImportInput{ReferenceYear: 2026, FileName: "test.zip", FileSHA256: checksum})
+	replayed, err := repository.BeginImport(ctx, outbound.HistoricalImportInput{ReferenceYear: 2026, FileName: "test.zip", FileSHA256: checksum})
 	if err != nil {
 		t.Fatalf("replay import: %v", err)
 	}

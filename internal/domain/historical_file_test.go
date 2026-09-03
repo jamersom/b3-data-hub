@@ -10,16 +10,16 @@ func TestHistoricalFileValidate(t *testing.T) {
 	}{
 		{
 			name: "valid zip",
-			file: HistoricalFile{Year: 2025, Data: []byte{0x50, 0x4B, 0x03, 0x04}},
+			file: HistoricalFile{Year: 2025, Size: 4, Header: []byte{0x50, 0x4B, 0x03, 0x04}},
 		},
 		{
 			name:    "html instead of zip",
-			file:    HistoricalFile{Year: 2025, Data: []byte("<html>")},
+			file:    HistoricalFile{Year: 2025, Size: 6, Header: []byte("<htm")},
 			wantErr: true,
 		},
 		{
 			name:    "invalid year",
-			file:    HistoricalFile{Year: 1980, Data: []byte{0x50, 0x4B, 0x03, 0x04}},
+			file:    HistoricalFile{Year: 1980, Size: 4, Header: []byte{0x50, 0x4B, 0x03, 0x04}},
 			wantErr: true,
 		},
 	}

@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jamersom/b3-data-hub/internal/adapters/b3"
-	"github.com/jamersom/b3-data-hub/internal/adapters/cotahist"
-	"github.com/jamersom/b3-data-hub/internal/adapters/postgres"
-	"github.com/jamersom/b3-data-hub/internal/adapters/storage"
-	"github.com/jamersom/b3-data-hub/internal/application"
+	"github.com/jamersom/b3-data-hub/internal/adapters/outbound/b3"
+	"github.com/jamersom/b3-data-hub/internal/adapters/outbound/cotahist"
+	"github.com/jamersom/b3-data-hub/internal/adapters/outbound/postgres"
+	"github.com/jamersom/b3-data-hub/internal/adapters/outbound/storage"
+	"github.com/jamersom/b3-data-hub/internal/application/usecases"
 	"github.com/jamersom/b3-data-hub/internal/infra/config"
 	"github.com/jamersom/b3-data-hub/internal/infra/database"
 	applicationlogger "github.com/jamersom/b3-data-hub/internal/infra/logger"
@@ -56,7 +56,7 @@ func run(logger *slog.Logger) error {
 	fileStore := storage.NewLocalFileStore("./data")
 	parser := cotahist.NewParser()
 	repository := postgres.NewHistoricalQuoteRepository(databasePool)
-	importer := application.NewImportHistoricalQuotesService(source, fileStore, parser, repository, logger)
+	importer := usecases.NewImportHistoricalQuotesService(source, fileStore, parser, repository, logger)
 
 	year := time.Now().Year()
 	if len(os.Args) > 1 {
