@@ -2,11 +2,11 @@ version: "2"
 sql:
   - engine: "postgresql"
     schema: "migrations/001_create_historical_quotes.up.sql"
-    queries: "internal/adapters/postgres/queries"
+    queries: "internal/adapters/outbound/postgres/queries"
     gen:
       go:
         package: "sqlcgen"
-        out: "internal/adapters/postgres/sqlcgen"
+        out: "internal/adapters/outbound/postgres/sqlcgen"
         sql_package: "pgx/v5"
         emit_pointers_for_null_types: true
         emit_empty_slices: true

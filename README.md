@@ -2,7 +2,7 @@
 
 Projeto em Go para baixar, validar e armazenar arquivos de cotacoes historicas disponibilizados pela B3.
 
-O projeto utiliza uma arquitetura inspirada em Ports and Adapters (arquitetura hexagonal), mantendo regras de dominio e casos de uso separados de HTTP e armazenamento.
+O projeto utiliza Ports and Adapters (arquitetura hexagonal). As regras de negócio ficam no domínio, a coordenação do fluxo e os contratos externos ficam na camada de aplicação, e as integrações tecnológicas ficam nos adapters.
 
 ## Fluxo de importacao
 
@@ -13,31 +13,45 @@ A importacao segue estas etapas:
 3. `HistoricalQuoteSource` solicita o arquivo historico ao adapter da B3.
 4. `HistoricalFile` valida o ano e a assinatura ZIP do conteudo.
 5. `FileStore` envia o arquivo validado ao adapter de armazenamento.
-6. O caso de uso retorna o caminho e o tamanho do arquivo salvo.
+6. `HistoricalQuoteRepository` registra a importação no PostgreSQL.
+7. `HistoricalQuoteParser` interpreta os registros do arquivo COTAHIST.
+8. As cotações são persistidas em lotes pelo adapter PostgreSQL.
+9. O caso de uso conclui a importação e retorna o resultado do processamento.
 
 ```text
 cmd/main.go
         |
         v
+application/usecases
 ImportHistoricalQuotesService
         |
-        +--> HistoricalQuoteSource (port)
+        +--> HistoricalQuoteSource (outbound port)
         |          |
         |          v
-        |     adapter/b3 -> HTTP B3
+        |     adapter/outbound/b3 -> HTTP B3
         |
         +--> HistoricalFile.Validate()
         |          |
         |          v
-        |        domain
+        |     domain
         |
-        +--> FileStore (port)
+        +--> FileStore (outbound port)
+        |          |
+        |          v
+        |     adapter/outbound/storage -> disco local
+        |
+        +--> HistoricalQuoteParser (outbound port)
+        |          |
+        |          v
+        |     adapter/outbound/cotahist -> registros
+        |
+        `--> HistoricalQuoteRepository (outbound port)
                    |
                    v
-          adapter/storage -> disco local
+              adapter/outbound/postgres -> PostgreSQL
 ```
 
-As interfaces em `internal/application/ports` descrevem o que o caso de uso necessita. Os tipos em `internal/adapters` fornecem as implementacoes concretas.
+As interfaces em `internal/application/ports/outbound` descrevem as capacidades externas necessárias pelos casos de uso. O domínio permanece independente em `internal/domain`, e os tipos em `internal/adapters` fornecem as implementações concretas.
 
 ## Estrutura
 
@@ -48,17 +62,21 @@ b3-data-hub/
 |-- internal/
 |   |-- domain/
 |   |-- application/
-|   |   `-- ports/
+|   |   |-- ports/
+|   |   |   `-- outbound/
+|   |   `-- usecases/
 |   |-- adapters/
-|   |   |-- b3/
-|   |   |-- cotahist/
-|   |   |-- postgres/
-|   |   |   |-- queries/
-|   |   |   `-- sqlcgen/
-|   |   `-- storage/
+|   |   `-- outbound/
+|   |       |-- b3/
+|   |       |-- cotahist/
+|   |       |-- postgres/
+|   |       |   |-- queries/
+|   |       |   `-- sqlcgen/
+|   |       `-- storage/
 |   `-- infra/
 |       |-- config/
-|       `-- database/
+|       |-- database/
+|       `-- logger/
 |-- migrations/
 |-- compose.yaml
 |-- go.mod
@@ -69,16 +87,17 @@ b3-data-hub/
 
 - `cmd`: ponto de entrada e composicao das dependencias.
 - `internal/domain`: entidades e regras independentes de infraestrutura.
-- `internal/application`: caso de uso e coordenacao da importacao.
-- `internal/application/ports`: contratos consumidos pela aplicacao.
-- `internal/adapters/b3`: download HTTP do arquivo disponibilizado pela B3.
-- `internal/adapters/cotahist`: parser dos registros fixos do arquivo COTAHIST.
-- `internal/adapters/postgres`: implementacao do repositorio de cotacoes.
-- `internal/adapters/postgres/queries`: comandos SQL mantidos manualmente.
-- `internal/adapters/postgres/sqlcgen`: codigo Go tipado gerado pelo sqlc; nao deve ser editado manualmente.
-- `internal/adapters/storage`: armazenamento do ZIP no disco local.
+- `internal/application/ports/outbound`: contratos das dependências externas usadas pela aplicação.
+- `internal/application/usecases`: coordenação dos casos de uso da aplicação.
+- `internal/adapters/outbound/b3`: download HTTP do arquivo disponibilizado pela B3.
+- `internal/adapters/outbound/cotahist`: parser dos registros fixos do arquivo COTAHIST.
+- `internal/adapters/outbound/postgres`: implementacao do repositorio de cotacoes.
+- `internal/adapters/outbound/postgres/queries`: comandos SQL mantidos manualmente.
+- `internal/adapters/outbound/postgres/sqlcgen`: codigo Go tipado gerado pelo sqlc; nao deve ser editado manualmente.
+- `internal/adapters/outbound/storage`: armazenamento do ZIP no disco local.
 - `internal/infra/config`: leitura e validacao das variaveis de ambiente.
 - `internal/infra/database`: criacao e verificacao do pool PostgreSQL.
+- `internal/infra/logger`: configuração do logger estruturado da aplicação.
 
 ## Executando
 
@@ -146,7 +165,7 @@ go vet ./...
 
 - validar a integridade completa do ZIP com `archive/zip`;
 - detectar respostas maiores que o limite configurado;
-- fazer download em streaming, sem manter todo o ZIP em memoria;
+- permitir configurar o limite máximo do download por ambiente;
 - implementar retry com backoff para falhas transitorias;
 - disponibilizar uma API REST para consultas;
 - executar importacoes automaticas por agendamento.
@@ -282,7 +301,7 @@ O teste unitario nao exige PostgreSQL. Para executar o teste real de conexao no 
 ```powershell
 $env:DATABASE_INTEGRATION_TEST = "1"
 $env:DATABASE_URL = "postgres://b3_user:b3_local_password@localhost:5432/b3_data_hub?sslmode=disable"
-go test ./internal/adapters/postgres -run TestNewPoolIntegration -v
+go test ./internal/adapters/outbound/postgres -run TestNewPoolIntegration -v
 ```
 ### Migrations iniciais
 
@@ -329,7 +348,7 @@ Calculo do SHA-256
 Parser do TXT de 245 posicoes
     |
     v
-Lotes de 2.000 registros
+Lotes de 10.000 registros
     |
     v
 PostgreSQL via COPY
@@ -351,6 +370,8 @@ O parser:
 
 O TXT descompactado e processado linha por linha. Ele nao e carregado por inteiro na memoria.
 
+O download do ZIP também é feito em streaming para um arquivo temporário. Durante a cópia, a aplicação calcula o SHA-256 e rejeita respostas acima de 512 MiB. Depois da validação, o arquivo temporário é movido para `data`, evitando manter o ZIP completo na memória.
+
 ### Controle da importacao
 
 Depois de validar e salvar o ZIP, a aplicacao calcula o SHA-256 e registra o processamento em `historical_imports`.
@@ -367,7 +388,7 @@ Cada cotacao guarda `import_id` e `line_number`, permitindo identificar o arquiv
 
 ### Gravacao em lote
 
-As cotacoes sao enviadas ao PostgreSQL em blocos de 2.000 registros com `pgx.CopyFrom`, que utiliza o protocolo `COPY`.
+As cotacoes sao enviadas ao PostgreSQL em blocos de 10.000 registros com `pgx.CopyFrom`, que utiliza o protocolo `COPY`.
 
 Valores monetarios sao convertidos para `NUMERIC` com a escala correta. Por exemplo:
 
@@ -386,16 +407,16 @@ Os dados sao armazenados em:
 Os comandos de controle da importacao (`SELECT`, `INSERT`, `UPDATE` e `DELETE`) ficam em:
 
 ```text
-internal/adapters/postgres/queries/historical_imports.sql
+internal/adapters/outbound/postgres/queries/historical_imports.sql
 ```
 
-O `sqlc.yaml` usa as migrations como schema e gera os tipos e metodos do adapter em `internal/adapters/postgres/sqlcgen`. Depois de alterar uma migration ou query, regenere o pacote:
+O `sqlc.yaml` usa as migrations como schema e gera os tipos e metodos do adapter em `internal/adapters/outbound/postgres/sqlcgen`. Depois de alterar uma migration ou query, regenere o pacote:
 
 ```powershell
 go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
 ```
 
-O repository utiliza os metodos gerados pelo sqlc dentro das transacoes. A carga das cotacoes continua usando `pgx.CopyFrom`, pois o protocolo `COPY` e mais adequado para os lotes de 2.000 registros.
+O repository utiliza os metodos gerados pelo sqlc dentro das transacoes. A carga das cotacoes continua usando `pgx.CopyFrom`, pois o protocolo `COPY` e mais adequado para os lotes de 10.000 registros.
 
 ### Executar uma importacao
 

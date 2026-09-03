@@ -1,4 +1,4 @@
-package ports
+package outbound
 
 import (
 	"context"
@@ -11,6 +11,7 @@ type HistoricalQuoteRecord struct {
 	Quote      domain.HistoricalQuote
 }
 
+// HistoricalQuoteParser converts a source file into quote records.
 type HistoricalQuoteParser interface {
 	Parse(ctx context.Context, file domain.HistoricalFile, consume func(HistoricalQuoteRecord) error) error
 }
