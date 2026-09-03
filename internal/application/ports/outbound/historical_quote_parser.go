@@ -7,8 +7,9 @@ import (
 )
 
 type HistoricalQuoteRecord struct {
-	LineNumber int
-	Quote      domain.HistoricalQuote
+	LineNumber   int
+	RecordSHA256 string
+	Quote        domain.HistoricalQuote
 }
 
 // HistoricalQuoteParser converts a source file into quote records.

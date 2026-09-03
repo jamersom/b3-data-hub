@@ -13,13 +13,40 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations/001_create_historical_quotes.up.sql:/docker-entrypoint-initdb.d/001_create_historical_quotes.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
+    networks:
+      - b3_data_hub
+
+  migrate:
+    image: postgres:17-alpine
+    restart: "no"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - sh
+      - -c
+      - |
+        until pg_isready -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"; do
+          sleep 2
+        done
+
+        if [ "$$(psql -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -tAc "SELECT to_regclass('public.historical_imports') IS NULL")" = "t" ]; then
+          psql -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -v ON_ERROR_STOP=1 -f /migrations/001_create_historical_quotes.up.sql
+        fi
+
+        psql -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -v ON_ERROR_STOP=1 -f /migrations/002_publish_import_versions.up.sql
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - b3_data_hub
 
@@ -41,8 +68,8 @@ services:
     volumes:
       - ./data:/app/data
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - b3_data_hub
 

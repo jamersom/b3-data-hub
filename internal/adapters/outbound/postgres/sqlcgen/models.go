@@ -13,17 +13,24 @@ type HistoricalImport struct {
 	ReferenceYear int16
 	FileName      string
 	FileSha256    string
+	FileSize      int64
+	SourceUrl     string
+	ParserVersion string
+	LayoutVersion string
 	Status        string
 	TotalRecords  int64
 	ErrorMessage  *string
 	StartedAt     pgtype.Timestamptz
 	CompletedAt   pgtype.Timestamptz
+	PublishedAt   pgtype.Timestamptz
+	SupersededAt  pgtype.Timestamptz
 }
 
 type HistoricalQuote struct {
 	ID                 int64
 	ImportID           int64
 	LineNumber         int32
+	RecordSha256       string
 	TradingDate        pgtype.Date
 	BdiCode            string
 	Ticker             string

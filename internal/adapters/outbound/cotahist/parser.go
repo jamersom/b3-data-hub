@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -17,6 +19,13 @@ import (
 const detailRecordLength = 245
 
 var ErrTXTEntryNotFound = errors.New("COTAHIST TXT entry not found in ZIP")
+
+type fileControl struct {
+	name           string
+	origin         string
+	generationDate time.Time
+	totalRecords   int
+}
 
 type Parser struct{}
 
@@ -44,31 +53,119 @@ func (p *Parser) Parse(ctx context.Context, file domain.HistoricalFile, consume 
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
 	lineNumber := 0
+	detailRecords := 0
+	var header *fileControl
+	var trailer *fileControl
 	for scanner.Scan() {
 		lineNumber++
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 
-		line := scanner.Text()
-		if len(line) < 2 || line[:2] != "01" {
-			continue
+		line := strings.TrimSuffix(scanner.Text(), "\r")
+		if len(line) != detailRecordLength {
+			return fmt.Errorf("line %d has invalid length: got %d, expected %d", lineNumber, len(line), detailRecordLength)
 		}
-		quote, err := parseDetail(line)
-		if err != nil {
-			return fmt.Errorf("parse COTAHIST line %d: %w", lineNumber, err)
-		}
-		if quote.TradingDate.Year() != file.Year {
-			return fmt.Errorf("line %d belongs to year %d, expected %d", lineNumber, quote.TradingDate.Year(), file.Year)
-		}
-		if err := consume(outbound.HistoricalQuoteRecord{LineNumber: lineNumber, Quote: quote}); err != nil {
-			return fmt.Errorf("consume COTAHIST line %d: %w", lineNumber, err)
+
+		switch line[:2] {
+		case "00":
+			if header != nil || lineNumber != 1 {
+				return fmt.Errorf("header must be the first and only record")
+			}
+			parsed, err := parseControlRecord(line, false)
+			if err != nil {
+				return fmt.Errorf("parse COTAHIST header: %w", err)
+			}
+			header = &parsed
+		case "01":
+			if header == nil {
+				return errors.New("detail record found before header")
+			}
+			if trailer != nil {
+				return errors.New("detail record found after trailer")
+			}
+			quote, err := parseDetail(line)
+			if err != nil {
+				return fmt.Errorf("parse COTAHIST line %d: %w", lineNumber, err)
+			}
+			if quote.TradingDate.Year() != file.Year {
+				return fmt.Errorf("line %d belongs to year %d, expected %d", lineNumber, quote.TradingDate.Year(), file.Year)
+			}
+			if err := quote.Normalize(); err != nil {
+				return fmt.Errorf("validate COTAHIST line %d: %w", lineNumber, err)
+			}
+			hash := sha256.Sum256([]byte(line))
+			if err := consume(outbound.HistoricalQuoteRecord{
+				LineNumber:   lineNumber,
+				RecordSHA256: hex.EncodeToString(hash[:]),
+				Quote:        quote,
+			}); err != nil {
+				return fmt.Errorf("consume COTAHIST line %d: %w", lineNumber, err)
+			}
+			detailRecords++
+		case "99":
+			if header == nil {
+				return errors.New("trailer found before header")
+			}
+			if trailer != nil {
+				return errors.New("multiple trailer records")
+			}
+			parsed, err := parseControlRecord(line, true)
+			if err != nil {
+				return fmt.Errorf("parse COTAHIST trailer: %w", err)
+			}
+			trailer = &parsed
+		default:
+			return fmt.Errorf("unsupported record type %q at line %d", line[:2], lineNumber)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("scan COTAHIST TXT: %w", err)
 	}
+	if header == nil {
+		return errors.New("COTAHIST header not found")
+	}
+	if trailer == nil {
+		return errors.New("COTAHIST trailer not found")
+	}
+	if header.name != trailer.name || header.origin != trailer.origin || !header.generationDate.Equal(trailer.generationDate) {
+		return errors.New("COTAHIST header and trailer metadata differ")
+	}
+	expectedName := fmt.Sprintf("COTAHIST.%d", file.Year)
+	if header.name != expectedName {
+		return fmt.Errorf("file declares name %q, expected %q", header.name, expectedName)
+	}
+	if trailer.totalRecords != lineNumber && trailer.totalRecords != detailRecords {
+		return fmt.Errorf(
+			"trailer declares %d records, parsed %d total and %d detail records",
+			trailer.totalRecords,
+			lineNumber,
+			detailRecords,
+		)
+	}
 	return nil
+}
+
+func parseControlRecord(line string, trailer bool) (fileControl, error) {
+	date, err := parseDate(field(line, 23, 31), false)
+	if err != nil {
+		return fileControl{}, fmt.Errorf("generation date: %w", err)
+	}
+	control := fileControl{
+		name:           trim(field(line, 2, 15)),
+		origin:         trim(field(line, 15, 23)),
+		generationDate: *date,
+	}
+	if control.origin != "BOVESPA" {
+		return fileControl{}, fmt.Errorf("unexpected origin %q", control.origin)
+	}
+	if trailer {
+		control.totalRecords, err = parseInt(field(line, 31, 42))
+		if err != nil {
+			return fileControl{}, fmt.Errorf("total records: %w", err)
+		}
+	}
+	return control, nil
 }
 
 func findTXTEntry(files []*zip.File) *zip.File {

@@ -6,11 +6,15 @@ type HistoricalImportInput struct {
 	ReferenceYear int
 	FileName      string
 	FileSHA256    string
+	FileSize      int64
+	SourceURL     string
+	ParserVersion string
+	LayoutVersion string
 }
 
 type HistoricalImport struct {
 	ID               int64
-	AlreadyCompleted bool
+	AlreadyPublished bool
 	TotalRecords     int64
 }
 
@@ -18,6 +22,6 @@ type HistoricalImport struct {
 type HistoricalQuoteRepository interface {
 	BeginImport(ctx context.Context, input HistoricalImportInput) (HistoricalImport, error)
 	InsertBatch(ctx context.Context, importID int64, records []HistoricalQuoteRecord) error
-	CompleteImport(ctx context.Context, importID, totalRecords int64) error
+	PublishImport(ctx context.Context, importID, totalRecords int64) error
 	FailImport(ctx context.Context, importID int64, cause error) error
 }
