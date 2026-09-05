@@ -16,7 +16,8 @@ A importacao segue estas etapas:
 6. `HistoricalQuoteRepository` registra a importação no PostgreSQL.
 7. `HistoricalQuoteParser` interpreta os registros do arquivo COTAHIST.
 8. As cotações são persistidas em lotes pelo adapter PostgreSQL.
-9. O caso de uso conclui a importação e retorna o resultado do processamento.
+9. O caso de uso valida header, trailer, contagem e regras do domínio.
+10. A nova versão anual é publicada atomicamente e substitui a versão anterior.
 
 ```text
 cmd/main.go
@@ -78,7 +79,8 @@ b3-data-hub/
 |       |-- database/
 |       `-- logger/
 |-- migrations/
-|-- compose.yaml
+|-- docker-compose.yml
+|-- docker-stack.yml
 |-- go.mod
 `-- README.md
 ```
@@ -172,7 +174,7 @@ go vet ./...
 
 ## PostgreSQL com Docker
 
-O ambiente local utiliza PostgreSQL 17 e e configurado pelo arquivo `compose.yaml`.
+O ambiente local utiliza PostgreSQL 17 e e configurado pelo arquivo `docker-compose.yml`.
 
 Copie o arquivo de exemplo quando `.env` ainda nao existir:
 
@@ -208,7 +210,78 @@ docker compose logs -f postgres
 
 ### Importacao agendada
 
-O servico `importer-scheduler` permanece ativo com o `crond` e executa `/app/b3-data-hub` todos os dias as `00:00`, no fuso `America/Sao_Paulo`. O binario e construido pelo `Dockerfile`, e os arquivos baixados permanecem no volume local `./data`.
+O serviço `importer-scheduler` permanece ativo com o `crond`. Os disparos ocorrem
+às **19h, 20h, 21h, 22h, 23h, 00h, 03h, 06h e 09h**, no fuso
+`America/Sao_Paulo`. Esses horários são uma política de tentativas do projeto;
+não representam um horário de publicação confirmado pela B3.
+
+```cron
+0 0,3,6,9,19,20,21,22,23 * * * cd /app && /app/b3-data-hub --scheduled >> /proc/1/fd/1 2>> /proc/1/fd/2
+```
+
+Cada ciclo começa às 19h de um dia de pregão e termina às 09h do dia seguinte,
+com até **nove tentativas**. Antes das 19h, a data de referência é a véspera:
+a madrugada e a manhã de sábado continuam associadas ao pregão de sexta-feira.
+Dias sem pregão não iniciam ciclos. O calendário considera fins de semana e
+feriados do mercado listado da B3.
+
+Antes de baixar, a aplicação consulta o PostgreSQL procurando cotações da data
+esperada em uma importação **publicada**, do ano correspondente. Se encontrar,
+encerra com `trading_date_already_published`, sem requisição de download à B3.
+Esse controle usa o estado já persistido das importações e cotações: não precisa
+de tabela adicional nem se perde quando o contêiner reinicia.
+
+Exemplo: se às 19h e 20h o arquivo estiver desatualizado, mas às **21h** o pregão
+esperado for importado e publicado, os disparos de 22h, 23h, 00h, 03h, 06h e 09h
+apenas conferem o banco e encerram. O cron continua disparando; o download é
+que deixa de ocorrer. Um checksum já conhecido, sozinho, não conclui o ciclo:
+o pregão esperado precisa estar publicado.
+
+Se houver HTTP 404, timeout ou outro erro, a execução registra a falha e o cron
+tenta novamente no próximo horário. Um arquivo válido ainda desatualizado pode
+ser importado pelo fluxo normal, mas mantém o ciclo pendente. Às 09h, se o download
+falhar ou o arquivo continuar desatualizado, é registrado `scheduled import cycle
+exhausted` em nível ERROR. Não há envio automático de e-mail ou mensagem. Os
+horários perdidos enquanto o host/Docker estiver desligado não são recuperados
+pelo cron.
+
+Um advisory lock do PostgreSQL (`42330001`) impede sobreposição entre processos
+agendados e importações manuais desta versão. O bloqueio cobre a verificação,
+download, importação e publicação, usando uma conexão dedicada adicional ao pool.
+A conexão é fechada ao final e o banco libera o bloqueio. Um processo agendado
+que encontra o bloqueio ocupado encerra com `import_in_progress`.
+
+O binário é construído pelo `Dockerfile`. O cron executa `cd /app`, e a imagem
+define `DATA_DIR=/app/data`, corrigindo o antigo comportamento de salvar em
+`/root/data`. No Docker Compose, `/app/data` está vinculado à pasta local `./data`.
+No Docker Stack, configure um volume nesse caminho se precisar preservar os ZIPs
+após substituir o contêiner; o controle de conclusão permanece no PostgreSQL.
+
+#### Calendário de pregões
+
+O arquivo `config/trading-calendar.json` contém os dias **sem pregão** por ano,
+baseado nos calendários oficiais da B3 para
+[2025](https://www.b3.com.br/pt_br/noticias/calendario-de-feriados-2025.htm) e
+[2026](https://www.b3.com.br/pt_br/noticias/calendario-de-negociacao-da-b3-confira-o-funcionamento-da-bolsa-em-2026.htm).
+Quarta-feira de Cinzas é dia de pregão; 9 de julho também tem negociação.
+
+Atualize o JSON conforme o calendário oficial antes de entrar em um ano novo.
+Se o ano do ciclo estiver ausente, o modo agendado falha explicitamente, em vez
+de presumir um calendário. Para usar outro arquivo, defina
+`TRADING_CALENDAR_PATH` com um caminho acessível ao processo. Na imagem, o padrão
+é `/app/config/trading-calendar.json`; ao editar o calendário local, reconstrua
+a imagem ou monte o arquivo atualizado nesse caminho.
+
+#### Aplicar alterações do agendamento
+
+Com o banco e as migrations já preparados:
+
+```bash
+docker compose up -d --build --no-deps importer-scheduler
+```
+
+Esse comando reconstrói e recria apenas o importador. Alterações no cron e no
+calendário copiados para a imagem exigem essa reconstrução.
 
 Acompanhe as importacoes:
 
@@ -223,10 +296,38 @@ docker compose exec importer-scheduler date
 docker compose exec importer-scheduler cat /etc/crontabs/root
 ```
 
-Execute imediatamente para testar sem esperar a meia-noite:
+Execute a verificação agendada imediatamente, respeitando o ciclo e a consulta
+prévia ao banco:
 
 ```bash
-docker compose exec importer-scheduler /app/b3-data-hub
+docker compose exec -w /app importer-scheduler /app/b3-data-hub --scheduled
+```
+
+Para executar uma importação manual, inclusive para buscar correções posteriores
+da B3 em um pregão já publicado, omita `--scheduled`:
+
+```bash
+docker compose exec -w /app importer-scheduler /app/b3-data-hub
+docker compose exec -w /app importer-scheduler /app/b3-data-hub 2025
+```
+
+O modo manual mantém a verificação de checksum após o download e o bloqueio de
+concorrência, mas não pula o download pela data de pregão. O modo agendado baixa
+o arquivo anual do ano do ciclo, inclusive quando a execução cruza a virada do ano.
+
+Testes do agendamento:
+
+```bash
+go test ./internal/domain ./internal/application/usecases
+```
+
+O teste de integração do controle de agendamento verifica o bloqueio e consulta
+dados publicados sem alterar cotações. Requer banco configurado e populado. No
+PowerShell, execute a partir da raiz do projeto:
+
+```powershell
+$env:DATABASE_INTEGRATION_TEST = '1'
+go test ./internal/adapters/outbound/postgres -run TestScheduledImportStateIntegration -count=1 -v
 ```
 
 O host do PostgreSQL dentro da rede Docker e `postgres`; `localhost` apontaria para o proprio container do importador.
@@ -366,6 +467,10 @@ O parser:
 - converte `00000000` e `99991231` em vencimento nulo;
 - mantem valores financeiros como inteiros escalados, evitando perda de precisao com `float64`;
 - verifica se o ano das cotacoes corresponde ao ano do arquivo;
+- valida a correspondencia entre header e trailer e a contagem declarada de registros;
+- normaliza ticker e ISIN para maiusculas e converte a moeda `R$` para `BRL`;
+- valida campos obrigatorios e a coerencia dos precos de abertura, maxima, minima e fechamento;
+- calcula um SHA-256 para cada registro de detalhe;
 - respeita cancelamento e timeout por `context.Context`.
 
 O TXT descompactado e processado linha por linha. Ele nao e carregado por inteiro na memoria.
@@ -379,12 +484,14 @@ Depois de validar e salvar o ZIP, a aplicacao calcula o SHA-256 e registra o pro
 A importacao:
 
 - inicia com status `processing`;
-- termina com status `completed` e a quantidade de registros;
+- termina com status `published` e a quantidade de registros;
 - recebe status `failed` e a mensagem do erro em caso de falha;
-- reconhece um arquivo concluido pelo mesmo SHA-256 e evita processa-lo novamente;
-- limpa linhas parciais e reinicia o lote quando o mesmo arquivo havia falhado anteriormente.
+- reconhece um arquivo publicado pelo mesmo SHA-256 e evita processa-lo novamente;
+- limpa linhas parciais quando uma importacao falha;
+- mantem a versao anual anterior publicada enquanto a nova versao esta em processamento;
+- publica a nova versao em uma transacao, remove as cotacoes substituidas e marca a importacao anterior como `superseded`.
 
-Cada cotacao guarda `import_id` e `line_number`, permitindo identificar o arquivo e a linha que originaram o registro.
+Cada cotacao guarda `import_id`, `line_number` e `record_sha256`, permitindo identificar o arquivo, a linha de origem e registros repetidos dentro da mesma importacao. A view `published_historical_quotes` expoe somente a versao anual publicada e deve ser usada por servicos de consulta.
 
 ### Gravacao em lote
 
@@ -429,7 +536,7 @@ go run ./cmd 2026
 Consulte o lote criado:
 
 ```sql
-SELECT id, reference_year, status, total_records, completed_at
+SELECT id, reference_year, status, total_records, completed_at, published_at
 FROM historical_imports
 ORDER BY id DESC;
 ```
@@ -438,7 +545,7 @@ Consulte as cotacoes de um ticker:
 
 ```sql
 SELECT trading_date, ticker, open_price, high_price, low_price, close_price
-FROM historical_quotes
+FROM published_historical_quotes
 WHERE ticker = 'PETR4'
 ORDER BY trading_date DESC
 LIMIT 20;

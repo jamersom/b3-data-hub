@@ -41,20 +41,31 @@ func (r *HistoricalQuoteRepository) BeginImport(ctx context.Context, input outbo
 
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		existing.ID, err = queries.CreateHistoricalImport(ctx, sqlcgen.CreateHistoricalImportParams{
-			ReferenceYear: int16(input.ReferenceYear),
-			FileName:      input.FileName,
-			FileSha256:    input.FileSHA256,
-		})
+		err = tx.QueryRow(ctx, `
+			INSERT INTO historical_imports (
+				reference_year, file_name, file_sha256, file_size,
+				source_url, parser_version, layout_version, status
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'processing')
+			RETURNING id
+		`,
+			input.ReferenceYear,
+			input.FileName,
+			input.FileSHA256,
+			input.FileSize,
+			input.SourceURL,
+			input.ParserVersion,
+			input.LayoutVersion,
+		).Scan(&existing.ID)
 		if err != nil {
 			return outbound.HistoricalImport{}, fmt.Errorf("insert historical import: %w", err)
 		}
 	case err != nil:
 		return outbound.HistoricalImport{}, fmt.Errorf("find historical import: %w", err)
-	case found.Status == "completed":
+	case found.Status == "published":
 		existing.ID = found.ID
 		existing.TotalRecords = found.TotalRecords
-		existing.AlreadyCompleted = true
+		existing.AlreadyPublished = true
 		if err := tx.Commit(ctx); err != nil {
 			return outbound.HistoricalImport{}, fmt.Errorf("commit existing import: %w", err)
 		}
@@ -102,16 +113,83 @@ func (r *HistoricalQuoteRepository) InsertBatch(ctx context.Context, importID in
 	return nil
 }
 
-func (r *HistoricalQuoteRepository) CompleteImport(ctx context.Context, importID, totalRecords int64) error {
-	rowsAffected, err := r.queries.CompleteHistoricalImport(ctx, sqlcgen.CompleteHistoricalImportParams{
-		ID:           importID,
-		TotalRecords: totalRecords,
-	})
+func (r *HistoricalQuoteRepository) PublishImport(ctx context.Context, importID, totalRecords int64) error {
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("complete historical import: %w", err)
+		return fmt.Errorf("begin publish transaction: %w", err)
 	}
-	if rowsAffected != 1 {
-		return fmt.Errorf("complete historical import: import %d is not processing", importID)
+	defer tx.Rollback(ctx)
+
+	var referenceYear int
+	if err := tx.QueryRow(ctx, `
+		SELECT reference_year
+		FROM historical_imports
+		WHERE id = $1 AND status = 'processing'
+		FOR UPDATE
+	`, importID).Scan(&referenceYear); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("publish import: import %d is not processing", importID)
+		}
+		return fmt.Errorf("lock import for publication: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", referenceYear); err != nil {
+		return fmt.Errorf("lock reference year for publication: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT id
+		FROM historical_imports
+		WHERE reference_year = $1 AND status = 'published' AND id <> $2
+		FOR UPDATE
+	`, referenceYear, importID)
+	if err != nil {
+		return fmt.Errorf("lock previous published imports: %w", err)
+	}
+	var previousIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan previous published import: %w", err)
+		}
+		previousIDs = append(previousIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate previous published imports: %w", err)
+	}
+	rows.Close()
+
+	if len(previousIDs) > 0 {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM historical_quotes
+			WHERE import_id = ANY($1)
+		`, previousIDs); err != nil {
+			return fmt.Errorf("delete superseded quotes: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE historical_imports
+			SET status = 'superseded', superseded_at = NOW()
+			WHERE id = ANY($1)
+		`, previousIDs); err != nil {
+			return fmt.Errorf("supersede previous imports: %w", err)
+		}
+	}
+
+	result, err := tx.Exec(ctx, `
+		UPDATE historical_imports
+		SET status = 'published', total_records = $2,
+			completed_at = NOW(), published_at = NOW(), error_message = NULL
+		WHERE id = $1 AND status = 'processing'
+	`, importID, totalRecords)
+	if err != nil {
+		return fmt.Errorf("publish historical import: %w", err)
+	}
+	if result.RowsAffected() != 1 {
+		return fmt.Errorf("publish historical import: import %d is not processing", importID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit historical import publication: %w", err)
 	}
 	return nil
 }
@@ -121,12 +199,24 @@ func (r *HistoricalQuoteRepository) FailImport(ctx context.Context, importID int
 	if cause != nil {
 		message = cause.Error()
 	}
-	err := r.queries.FailHistoricalImport(ctx, sqlcgen.FailHistoricalImportParams{
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin fail import transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	queries := r.queries.WithTx(tx)
+	if err := queries.DeleteHistoricalQuotesByImportID(ctx, importID); err != nil {
+		return fmt.Errorf("delete partial historical quotes: %w", err)
+	}
+	err = queries.FailHistoricalImport(ctx, sqlcgen.FailHistoricalImportParams{
 		ID:           importID,
 		ErrorMessage: &message,
 	})
 	if err != nil {
 		return fmt.Errorf("fail historical import: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit failed import status: %w", err)
 	}
 	return nil
 }

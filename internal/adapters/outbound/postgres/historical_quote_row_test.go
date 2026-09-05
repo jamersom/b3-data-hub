@@ -11,7 +11,7 @@ import (
 func TestNewHistoricalQuoteRow(t *testing.T) {
 	expirationDate := time.Date(2027, time.June, 21, 0, 0, 0, 0, time.UTC)
 	record := outbound.HistoricalQuoteRecord{
-		LineNumber: 42,
+		LineNumber: 42, RecordSHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Quote: domain.HistoricalQuote{
 			TradingDate: time.Date(2026, time.August, 10, 0, 0, 0, 0, time.UTC),
 			Ticker:      "PETR4", OpenPriceCents: 12638, Term: "",

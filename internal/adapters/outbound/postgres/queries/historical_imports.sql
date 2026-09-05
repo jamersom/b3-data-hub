@@ -5,8 +5,11 @@ WHERE file_sha256 = $1
 FOR UPDATE;
 
 -- name: CreateHistoricalImport :one
-INSERT INTO historical_imports (reference_year, file_name, file_sha256, status)
-VALUES ($1, $2, $3, 'processing')
+INSERT INTO historical_imports (
+    reference_year, file_name, file_sha256, file_size,
+    source_url, parser_version, layout_version, status
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'processing')
 RETURNING id;
 
 -- name: DeleteHistoricalQuotesByImportID :exec
@@ -19,17 +22,10 @@ SET status = 'processing',
     total_records = 0,
     error_message = NULL,
     started_at = NOW(),
-    completed_at = NULL
+    completed_at = NULL,
+    published_at = NULL,
+    superseded_at = NULL
 WHERE id = $1;
-
--- name: CompleteHistoricalImport :execrows
-UPDATE historical_imports
-SET status = 'completed',
-    total_records = $2,
-    completed_at = NOW(),
-    error_message = NULL
-WHERE id = $1
-  AND status = 'processing';
 
 -- name: FailHistoricalImport :exec
 UPDATE historical_imports

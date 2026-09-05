@@ -16,9 +16,12 @@ WORKDIR /app
 
 COPY --from=builder /bin/b3-data-hub /app/b3-data-hub
 COPY docker/crontab /etc/crontabs/root
+COPY config/trading-calendar.json /app/config/trading-calendar.json
 
 RUN mkdir -p /app/data
 
 ENV TZ=America/Sao_Paulo
+ENV DATA_DIR=/app/data
+ENV TRADING_CALENDAR_PATH=/app/config/trading-calendar.json
 
 CMD ["crond", "-f", "-l", "2"]

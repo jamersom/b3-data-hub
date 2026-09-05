@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/jamersom/b3-data-hub/internal/adapters/outbound/b3"
@@ -14,6 +15,7 @@ import (
 	"github.com/jamersom/b3-data-hub/internal/adapters/outbound/postgres"
 	"github.com/jamersom/b3-data-hub/internal/adapters/outbound/storage"
 	"github.com/jamersom/b3-data-hub/internal/application/usecases"
+	"github.com/jamersom/b3-data-hub/internal/domain"
 	"github.com/jamersom/b3-data-hub/internal/infra/config"
 	"github.com/jamersom/b3-data-hub/internal/infra/database"
 	applicationlogger "github.com/jamersom/b3-data-hub/internal/infra/logger"
@@ -53,17 +55,53 @@ func run(logger *slog.Logger) error {
 
 	client := &http.Client{Timeout: 2 * time.Minute}
 	source := b3.NewHistoricalQuoteSource(client)
-	fileStore := storage.NewLocalFileStore("./data")
+	dataDir := os.Getenv("DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+	fileStore := storage.NewLocalFileStore(dataDir)
 	parser := cotahist.NewParser()
 	repository := postgres.NewHistoricalQuoteRepository(databasePool)
 	importer := usecases.NewImportHistoricalQuotesService(source, fileStore, parser, repository, logger)
 
 	year := time.Now().Year()
+	if len(os.Args) > 2 {
+		return fmt.Errorf("usage: b3-data-hub [year | --scheduled]")
+	}
+	if len(os.Args) == 2 && os.Args[1] == "--scheduled" {
+		calendarPath := os.Getenv("TRADING_CALENDAR_PATH")
+		if calendarPath == "" {
+			calendarPath = "config/trading-calendar.json"
+		}
+		data, err := os.ReadFile(calendarPath)
+		if err != nil {
+			return fmt.Errorf("read trading calendar: %w", err)
+		}
+		calendar, err := domain.NewTradingCalendar(data)
+		if err != nil {
+			return err
+		}
+		outcome, err := usecases.NewScheduledImportService(importer, repository, calendar, logger).Execute(ctx, time.Now())
+		if err != nil {
+			return err
+		}
+		logger.Info("application completed", "outcome", outcome)
+		return nil
+	}
 	if len(os.Args) > 1 {
-		if _, err := fmt.Sscanf(os.Args[1], "%d", &year); err != nil {
+		year, err = strconv.Atoi(os.Args[1])
+		if err != nil {
 			return fmt.Errorf("invalid year %q: %w", os.Args[1], err)
 		}
 	}
+	release, acquired, err := repository.TryAcquireImportLock(ctx)
+	if err != nil {
+		return err
+	}
+	if !acquired {
+		return fmt.Errorf("another import is already running")
+	}
+	defer release()
 
 	result, err := importer.Execute(ctx, year)
 	if err != nil {

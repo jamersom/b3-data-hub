@@ -9,7 +9,7 @@ import (
 )
 
 var historicalQuoteColumns = []string{
-	"import_id", "line_number", "trading_date", "bdi_code", "ticker", "market_type",
+	"import_id", "line_number", "record_sha256", "trading_date", "bdi_code", "ticker", "market_type",
 	"short_name", "specification", "term", "currency", "open_price", "high_price",
 	"low_price", "average_price", "close_price", "best_bid_price", "best_ask_price",
 	"trade_count", "traded_quantity", "traded_volume", "strike_price", "option_indicator",
@@ -19,6 +19,7 @@ var historicalQuoteColumns = []string{
 type historicalQuoteRow struct {
 	ImportID           int64
 	LineNumber         int
+	RecordSHA256       string
 	TradingDate        time.Time
 	BDICode            string
 	Ticker             string
@@ -52,6 +53,7 @@ func newHistoricalQuoteRow(importID int64, record outbound.HistoricalQuoteRecord
 	return historicalQuoteRow{
 		ImportID:           importID,
 		LineNumber:         record.LineNumber,
+		RecordSHA256:       record.RecordSHA256,
 		TradingDate:        quote.TradingDate,
 		BDICode:            quote.BDICode,
 		Ticker:             quote.Ticker,
@@ -84,6 +86,7 @@ func (r historicalQuoteRow) values() []any {
 	return []any{
 		r.ImportID,
 		r.LineNumber,
+		r.RecordSHA256,
 		r.TradingDate,
 		r.BDICode,
 		r.Ticker,

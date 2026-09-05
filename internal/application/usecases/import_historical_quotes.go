@@ -13,6 +13,11 @@ import (
 
 const quoteBatchSize = 10000
 
+const (
+	parserVersion = "1.1.0"
+	layoutVersion = "COTAHIST-2017-01"
+)
+
 type ImportHistoricalQuotesService struct {
 	source     outbound.HistoricalQuoteSource
 	fileStore  outbound.FileStore
@@ -60,11 +65,15 @@ func (s *ImportHistoricalQuotesService) Execute(ctx context.Context, year int) (
 		ReferenceYear: prepared.file.Year,
 		FileName:      prepared.file.FileName,
 		FileSHA256:    prepared.checksum,
+		FileSize:      prepared.file.Size,
+		SourceURL:     prepared.file.SourceURL,
+		ParserVersion: parserVersion,
+		LayoutVersion: layoutVersion,
 	})
 	if err != nil {
 		return prepared.result, fmt.Errorf("begin historical import: %w", err)
 	}
-	if batch.AlreadyCompleted {
+	if batch.AlreadyPublished {
 		prepared.result.Records = batch.TotalRecords
 		prepared.result.AlreadyImported = true
 		logger.InfoContext(ctx, "historical import skipped",
@@ -81,8 +90,8 @@ func (s *ImportHistoricalQuotesService) Execute(ctx context.Context, year int) (
 	if err != nil {
 		return prepared.result, s.failImport(ctx, batch.ID, total, startedAt, err, logger)
 	}
-	if err := s.repository.CompleteImport(ctx, batch.ID, total); err != nil {
-		return prepared.result, fmt.Errorf("complete historical import: %w", err)
+	if err := s.repository.PublishImport(ctx, batch.ID, total); err != nil {
+		return prepared.result, fmt.Errorf("publish historical import: %w", err)
 	}
 
 	prepared.result.Records = total

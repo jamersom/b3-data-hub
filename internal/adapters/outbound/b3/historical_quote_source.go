@@ -58,6 +58,7 @@ func (s *HistoricalQuoteSource) Download(ctx context.Context, year int) (domain.
 		Path:        file.path,
 		Size:        file.size,
 		SHA256:      file.sha256,
+		SourceURL:   url,
 		Header:      file.header,
 	}
 
