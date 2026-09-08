@@ -14,7 +14,7 @@ import (
 const quoteBatchSize = 10000
 
 const (
-	parserVersion = "1.1.0"
+	parserVersion = "1.2.0"
 	layoutVersion = "COTAHIST-2017-01"
 )
 
@@ -160,6 +160,21 @@ func (s *ImportHistoricalQuotesService) persistQuotes(ctx context.Context, file 
 	}
 
 	err := s.parser.Parse(ctx, file, func(record outbound.HistoricalQuoteRecord) error {
+		for _, code := range record.Quote.QualityAlerts() {
+			logger.WarnContext(ctx, "historical quote quality alert",
+				slog.String("quality_code", code),
+				slog.Int64("import_id", importID),
+				slog.String("file_name", file.FileName),
+				slog.Int("line_number", record.LineNumber),
+				slog.String("record_sha256", record.RecordSHA256),
+				slog.String("ticker", record.Quote.Ticker),
+				slog.String("trading_date", record.Quote.TradingDate.Format(time.DateOnly)),
+				slog.Int("market_type", record.Quote.MarketType),
+				slog.Int64("close_price_cents", record.Quote.ClosePriceCents),
+				slog.Int64("low_price_cents", record.Quote.LowPriceCents),
+				slog.Int64("high_price_cents", record.Quote.HighPriceCents),
+			)
+		}
 		records = append(records, record)
 		if len(records) == quoteBatchSize {
 			return flush()

@@ -84,12 +84,23 @@ func (q HistoricalQuote) Validate() error {
 	if q.OpenPriceCents < q.LowPriceCents || q.OpenPriceCents > q.HighPriceCents {
 		return errors.New("open price is outside daily range")
 	}
-	if q.ClosePriceCents < q.LowPriceCents || q.ClosePriceCents > q.HighPriceCents {
-		return errors.New("close price is outside daily range")
+	if q.ClosePriceCents < 0 {
+		return errors.New("close price cannot be negative")
 	}
 	if q.TradeCount < 0 || q.TradedQuantity < 0 || q.TradedVolumeCents < 0 {
 		return errors.New("trade totals cannot be negative")
 	}
 
+	return nil
+}
+
+const QualityCloseOutsideDailyRange = "close_outside_daily_range"
+
+// QualityAlerts reports source inconsistencies without changing published
+// values or rejecting structurally valid COTAHIST records.
+func (q HistoricalQuote) QualityAlerts() []string {
+	if q.ClosePriceCents < q.LowPriceCents || q.ClosePriceCents > q.HighPriceCents {
+		return []string{QualityCloseOutsideDailyRange}
+	}
 	return nil
 }
