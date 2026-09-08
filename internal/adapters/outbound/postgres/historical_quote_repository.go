@@ -79,6 +79,9 @@ func (r *HistoricalQuoteRepository) BeginImport(ctx context.Context, input outbo
 		if err := queries.RestartHistoricalImport(ctx, existing.ID); err != nil {
 			return outbound.HistoricalImport{}, fmt.Errorf("restart historical import: %w", err)
 		}
+		if _, err := tx.Exec(ctx, `UPDATE historical_imports SET parser_version = $2, layout_version = $3 WHERE id = $1`, existing.ID, input.ParserVersion, input.LayoutVersion); err != nil {
+			return outbound.HistoricalImport{}, fmt.Errorf("update restarted import versions: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
