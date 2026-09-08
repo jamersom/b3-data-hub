@@ -34,11 +34,40 @@ func TestHistoricalQuoteNormalize(t *testing.T) {
 	}
 }
 
-func TestHistoricalQuoteRejectsInvalidPriceRange(t *testing.T) {
-	quote := validHistoricalQuote()
-	quote.ClosePriceCents = 4700
+func TestHistoricalQuoteWarnsOutsideRange(t *testing.T) {
+	for _, close := range []int64{4200, 4700} {
+		quote := validHistoricalQuote()
+		quote.ClosePriceCents = close
+		if err := quote.Normalize(); err != nil {
+			t.Fatal(err)
+		}
+		alerts := quote.QualityAlerts()
+		if len(alerts) != 1 || alerts[0] != QualityCloseOutsideDailyRange || quote.ClosePriceCents != close {
+			t.Fatalf("unexpected quote/alerts: %+v %v", quote, alerts)
+		}
+	}
+	for _, close := range []int64{4300, 4500, 4600} {
+		quote := validHistoricalQuote()
+		quote.ClosePriceCents = close
+		if err := quote.Normalize(); err != nil {
+			t.Fatal(err)
+		}
+		if len(quote.QualityAlerts()) != 0 {
+			t.Fatal("unexpected alert for valid close")
+		}
+	}
+}
 
-	if err := quote.Normalize(); err == nil {
-		t.Fatal("expected price range validation error")
+func TestHistoricalQuoteStillRejectsInvalidData(t *testing.T) {
+	for _, change := range []func(*HistoricalQuote){
+		func(q *HistoricalQuote) { q.ClosePriceCents = -1 },
+		func(q *HistoricalQuote) { q.HighPriceCents = q.LowPriceCents - 1 },
+		func(q *HistoricalQuote) { q.OpenPriceCents = q.HighPriceCents + 1 },
+	} {
+		quote := validHistoricalQuote()
+		change(&quote)
+		if err := quote.Normalize(); err == nil {
+			t.Fatal("expected fatal validation error")
+		}
 	}
 }
