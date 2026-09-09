@@ -18,6 +18,7 @@ A importacao segue estas etapas:
 8. As cotações são persistidas em lotes pelo adapter PostgreSQL.
 9. O caso de uso valida header, trailer, contagem e regras do domínio.
 10. A nova versão anual é publicada atomicamente e substitui a versão anterior.
+11. O trigger da migration 004 consolida o calendário na mesma transação da publicação.
 
 ```text
 cmd/main.go
@@ -404,24 +405,29 @@ $env:DATABASE_INTEGRATION_TEST = "1"
 $env:DATABASE_URL = "postgres://b3_user:b3_local_password@localhost:5432/b3_data_hub?sslmode=disable"
 go test ./internal/adapters/outbound/postgres -run TestNewPoolIntegration -v
 ```
-### Migrations iniciais
+### Migrations
 
-O Compose monta a migration abaixo em `/docker-entrypoint-initdb.d`:
+O serviço `migrate` do Compose/Swarm executa os arquivos SQL em sequência:
 
-```text
-migrations/001_create_historical_quotes.up.sql
+| Migration | Finalidade |
+|---|---|
+| `001_create_historical_quotes` | Estrutura inicial, quando ainda não existe |
+| `002_publish_import_versions` | Controle de versões publicadas |
+| `003_observed_trading_calendar` | Contrato das views do calendário observado |
+| `004_consolidated_trading_calendar` | Tabelas consolidadas, índices, carga inicial e trigger de atualização |
+
+Para um banco que já possui as migrations 001 a 003, aplique somente a 004:
+
+```powershell
+docker compose run --rm migrate sh -c 'psql -h postgres -U $POSTGRES_USER -d $POSTGRES_DB -v ON_ERROR_STOP=1 -f /migrations/004_consolidated_trading_calendar.up.sql'
 ```
 
-O PostgreSQL executa scripts desse diretorio somente quando cria um volume de dados vazio. Alterar a migration depois que o banco ja foi inicializado nao a executa novamente.
-
-Para apagar o banco local, recriar o volume e executar a migration desde o inicio:
-
-```bash
-docker compose down -v
-docker compose up -d
-```
-
-O comando `down -v` apaga permanentemente os dados locais do PostgreSQL.
+O comando usa o PostgreSQL local do Compose e as variáveis do `.env`. Não é
+necessário apagar volumes nem reimportar o histórico. A carga inicial da 004
+bloqueia gravações enquanto consolida os dados: execute fora de importações.
+O serviço ainda não controla versões já aplicadas; executar a lista inteira
+repete as migrations, incluindo a consolidação. Não execute a 003 isoladamente
+após a 004, pois isso restaura as views pesadas.
 
 Para apenas parar os containers preservando os dados:
 
@@ -469,11 +475,21 @@ O parser:
 - verifica se o ano das cotacoes corresponde ao ano do arquivo;
 - valida a correspondencia entre header e trailer e a contagem declarada de registros;
 - normaliza ticker e ISIN para maiusculas e converte a moeda `R$` para `BRL`;
-- valida campos obrigatorios e a coerencia dos precos de abertura, maxima, minima e fechamento;
+- valida campos obrigatorios, máxima/mínima, abertura e fechamento não negativo;
+- sinaliza fechamento fora da faixa diária como alerta de qualidade, preservando o valor e continuando a importação;
 - calcula um SHA-256 para cada registro de detalhe;
 - respeita cancelamento e timeout por `context.Context`.
 
 O TXT descompactado e processado linha por linha. Ele nao e carregado por inteiro na memoria.
+
+Desde `parserVersion=1.2.0`, a divergência de fechamento gera um log `WARN` com
+`quality_code=close_outside_daily_range`, importação, linha, ticker, data e preços
+em centavos. A sinalização fica nos logs; não existe coluna de alerta na cotação.
+Outros erros de validação continuam fatais. A retomada de uma importação não
+publicada atualiza a versão do parser. Mudar essa versão não reprocessa
+automaticamente um checksum já publicado.
+
+Detalhes: [alertas de qualidade](docs/alertas-qualidade-cotahist.md).
 
 O download do ZIP também é feito em streaming para um arquivo temporário. Durante a cópia, a aplicação calcula o SHA-256 e rejeita respostas acima de 512 MiB. Depois da validação, o arquivo temporário é movido para `data`, evitando manter o ZIP completo na memória.
 
@@ -508,6 +524,74 @@ Os dados sao armazenados em:
 
 - `historical_imports`: controle, auditoria e deduplicacao das importacoes;
 - `historical_quotes`: cotacoes historicas extraidas dos registros tipo `01`.
+
+### Calendário consolidado
+
+O calendário é derivado dos dados oficiais do COTAHIST, com origem
+`cotahist_observed`. Usa todos os ativos, separados por mercado, e somente
+importações publicadas com registros de negócios. Uma data ausente não comprova
+feriado: também pode representar falta de cobertura.
+
+| Objeto | Uso |
+|---|---|
+| `trading_session_calendar` | Tabela de datas observadas, com contagem de registros e tickers |
+| `trading_calendar_coverage` | Tabela de limites observados, integridade e versão por importação/mercado |
+| `observed_trading_sessions` | View rápida para consultar as sessões consolidadas |
+| `observed_calendar_coverage` | View rápida para consultar a cobertura consolidada |
+| Views com sufixo `_source` | Cálculos pesados usados na consolidação e auditoria |
+
+Publicação, substituição e exclusão de importações atualizam o calendário por
+trigger, com rollback atômico. Correções manuais em cotações já publicadas exigem
+reconstrução ou nova publicação. Para consultas da API, use as views **sem**
+`_source`:
+
+```sql
+SELECT * FROM observed_trading_sessions
+WHERE market_type = 10
+ORDER BY trading_date;
+
+SELECT reference_year, observed_from, observed_to, session_count,
+       import_integrity_validated, calendar_version
+FROM observed_calendar_coverage
+WHERE market_type = 10
+ORDER BY reference_year;
+```
+
+Integridade validada significa que a contagem persistida corresponde à
+publicação, com datas do ano correto; não equivale à verificação de um calendário
+oficial independente. O consumidor deve conferir anos ausentes e limites parciais.
+A conexão desse calendário ao `market-data-api` permanece uma etapa separada.
+
+No banco medido, a consulta de 15.191 sessões caiu de **13,78 s para 1,264 ms**
+após consolidar 16.033.148 cotações. A cobertura retornou 83 linhas em 0,022 ms.
+São tempos de execução no PostgreSQL, sem transferência/renderização no cliente;
+não representam uma garantia de latência em outros ambientes.
+
+Detalhes: [calendário de pregões observados](docs/calendario-pregoes-observados.md).
+
+### Validação do calendário
+
+Testes gerais, análise estática e compilação:
+
+```powershell
+go test ./...
+go vet ./...
+go build ./...
+```
+
+O teste de integração específico usa a conexão configurada, cria um schema
+isolado e reverte a transação ao final, sem alterar as cotações publicadas:
+
+```powershell
+$env:CALENDAR_INTEGRATION_TEST = '1'
+go test ./internal/adapters/outbound/postgres -run '^TestObservedCalendarMigration$' -count=1 -v
+Remove-Item Env:CALENDAR_INTEGRATION_TEST
+```
+
+Ele verifica carga inicial, separação de mercados, integridade, atualização por
+publicação, exclusão, substituição, rollback e migrations up/down. Esses testes,
+`go vet` e build passaram na validação desta implementação. Outros testes de
+integração opt-in não são executados automaticamente por `go test ./...`.
 
 ### Geracao das queries com sqlc
 
